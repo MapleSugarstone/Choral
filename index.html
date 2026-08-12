@@ -1,0 +1,2247 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- Served straight off disk while the game is being worked on, and browsers
+     hold on to that hard. Without these a saved change can sit unseen behind a
+     cached copy, which reads as a control that does nothing. -->
+<meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="pragma" content="no-cache">
+<meta http-equiv="expires" content="0">
+<title>Choral</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<meta name="description" content="A Denlish game of Strategy.">
+<!-- What a link to the game shows when it is pasted somewhere. The paths are
+     relative, which most places resolve against the page they came from. Once
+     the game has an address of its own, writing these two out in full is what
+     covers the places that do not. -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="Choral">
+<meta property="og:description" content="A Denlish game of Strategy.">
+<meta property="og:image" content="preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="Ivy standing beside a boxed copy of Choral.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Choral">
+<meta name="twitter:description" content="A Denlish game of Strategy.">
+<meta name="twitter:image" content="preview.png">
+<style>
+  :root{
+    --bg:#15131a; --panel:#1d1a23; --line:#3b3546; --ink:#e9e4dc; --dim:#8d8698;
+    --board:#8b8778; --board2:#6f6b5d; --grid:#221f1b;
+    --red:#a83a1e; --white:#f1ede3; --gold:#d9b45c; --advice:#e8557d;
+  }
+  *{box-sizing:border-box}
+  html,body{background:var(--bg)}
+  body{
+    margin:0; color:var(--ink);
+    font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
+    display:flex; justify-content:center; padding:20px 14px 40px;
+    -webkit-font-smoothing:antialiased;
+  }
+  img{image-rendering:pixelated; image-rendering:crisp-edges}
+
+  /* Named areas, so Play Deus can sit in the side column on a wide screen and
+     directly under the board when the layout folds to one column. */
+  .wrap{width:100%; max-width:1160px; display:grid;
+        grid-template-columns:200px minmax(0,1fr) 300px;
+        grid-template-areas:"ivy board deus" "ivy board side" "ivy board foot";
+        gap:20px; align-items:start}
+  .ivy{grid-area:ivy} .boardcol{grid-area:board}
+  /* The board holds still while the side panels scroll past it, the same way Ivy
+     does. Only when it fits the window: pinning a column taller than the screen
+     would put its lower half permanently out of reach, so the class is applied
+     from script after measuring. */
+  .boardcol.stick{position:sticky; top:20px}
+  .sidecol{grid-area:side}
+  /* Ask Ivy sits at the top right on a wide screen. When the layout folds, Play
+     Deus takes that spot instead, since it belongs next to the board. */
+  .deuscol{grid-area:deus; display:flex; flex-direction:column}
+  .askpanel{order:0} .deuspanel{order:1}
+
+  /* Everything that belongs to Ivy fades together when she leaves, then stops
+     taking up room once the fade has finished. */
+  .ivy, .askpanel, #difflabel{transition:opacity .8s}
+  body.solo .ivy, body.solo .askpanel, body.solo #difflabel{opacity:0; pointer-events:none}
+  body.sologone .ivy, body.sologone .askpanel, body.sologone #difflabel{display:none}
+  .ask summary{list-style:none; cursor:pointer; font:inherit; font-size:13px; font-weight:700;
+               background:#131118; color:var(--ink); border:2px solid var(--line);
+               padding:7px 10px; text-align:center; user-select:none}
+  .ask summary::-webkit-details-marker{display:none}
+  .ask summary:hover{border-color:var(--gold)}
+  .ask[open] summary{border-color:var(--gold); color:var(--gold)}
+  .ask button{margin:8px 0 0; font-size:12px; text-align:left; padding:7px 9px}
+  /* Her advice is marked in reddish pink, which is used for nothing else, so it
+     never reads as danger or as the last move. */
+  #advicering{position:absolute; inset:0; pointer-events:none;
+              border:calc(var(--line) * 2) solid var(--advice);
+              background:rgba(232,85,125,.24);
+              animation:advice .8s infinite alternate}
+  @keyframes advice{from{opacity:.62} to{opacity:1}}
+  button.deus.advice{border-color:var(--advice); color:var(--advice);
+                     animation:advicebtn .8s infinite alternate}
+  @keyframes advicebtn{from{background:rgba(232,85,125,.10)} to{background:rgba(232,85,125,.30)}}
+
+  /* ---- Ivy ---- */
+  .ivy{position:sticky; top:20px; text-align:center}
+  .ivy img{width:166px; height:308px; display:block; margin:0 auto}
+  .ivy .name{margin-top:8px; font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--dim)}
+  .ivy .mood{font-size:11px; color:var(--gold); min-height:16px}
+
+  h1{font-size:24px; letter-spacing:.2em; text-transform:uppercase; margin:0 0 3px; font-weight:700}
+  .sub{color:var(--dim); font-size:13px; margin-bottom:14px}
+
+  /* ---- board ---- */
+  /* Every rule on the board is one stroke of the art, measured at two pixels in
+     the source files, so --line is set to two times the sprite multiplier and
+     the grid thickens in step with the pieces. The lines are drawn as the gap
+     and padding of the grid with the dark color behind it, which keeps the
+     inner rules and the outer frame at exactly the same weight. Borders on each
+     square would double wherever two squares meet. */
+  /* The mat carries no border of its own. A border is snapped to whole device
+     pixels, so on a display at 1.25 it landed on 1.6 where the grid stayed at
+     2, and the board showed two weights. The grid frame is the only rule now. */
+  .boardwrap{background:var(--board); padding:calc(var(--line) * 2);
+             width:max-content; max-width:100%; margin:0 auto; position:relative}
+  #board{transition:opacity .45s}
+  #board.done{opacity:.26}
+  /* The squares carry z-index 1 upward for depth, so the overlay has to sit
+     above the tallest of them or the board hit-tests in front of it and the
+     button beneath cannot be clicked. */
+  #over{position:absolute; inset:0; z-index:50; display:flex; flex-direction:column;
+        align-items:center; justify-content:center; gap:9px; padding:12px; pointer-events:none}
+  #over[hidden]{display:none}
+  .banner{font-size:clamp(20px,5vw,32px); letter-spacing:.14em; text-transform:uppercase;
+          font-weight:700; color:var(--ink); background:var(--panel);
+          border:var(--line) solid var(--gold); padding:10px 20px; text-align:center}
+  .overscore{display:flex; gap:14px; align-items:baseline; background:var(--panel);
+             border:var(--line) solid #3b3546; padding:6px 14px;
+             font-variant-numeric:tabular-nums}
+  .overscore b{font-size:20px; font-weight:700}
+  .overscore span{font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--dim)}
+  .overscore .red b{color:var(--red)}
+  .overscore .white b{color:var(--white)}
+  /* The overlay lets clicks through so the board stays readable behind it, so
+     the one thing meant to be pressed has to take them back. */
+  .overask{max-width:min(300px,88%); text-align:center; font-size:12px; line-height:1.5;
+           color:var(--ink); background:var(--panel); border:var(--line) solid #3b3546;
+           padding:8px 12px}
+  .overask[hidden]{display:none}
+  .overbtns{display:flex; gap:8px; flex-wrap:wrap; justify-content:center}
+  .rematch{width:auto; margin:0; pointer-events:auto; font-size:11px; font-weight:700;
+           letter-spacing:.16em; text-transform:uppercase; padding:9px 18px;
+           background:var(--panel); color:var(--ink); border:var(--line) solid #3b3546}
+  .rematch:hover{border-color:var(--gold); color:var(--gold)}
+  #board{display:grid; max-width:100%; aspect-ratio:1/1; margin:0 auto;
+         background:var(--grid); padding:var(--line); gap:var(--line)}
+  /* Pieces sit centred in their square. Art taller than the square overruns it
+     at both ends, and the squares carry a rising z-index down the board, so the
+     part that rises crosses in front of the row above while the part that dips
+     is covered by the nearer row below. Both readings are what depth looks
+     like. */
+  .cell{position:relative; min-width:0; min-height:0; overflow:visible;
+        display:flex; align-items:center; justify-content:center;
+        background:var(--board); cursor:default}
+  .cell.alt{background:var(--board2)}
+  .cell.playable{cursor:pointer}
+  .cell.playable:hover{outline:var(--line) solid var(--gold); outline-offset:calc(-1 * var(--line))}
+  /* Width is held to the square, because art spilling sideways would run into
+     the neighbours. Height is free, so taller art rises into the row above and
+     the z-index puts it in front. On a phone narrow enough that a square falls
+     under the sprite, the width clamp bites and the automatic height keeps the
+     proportions rather than squashing them. */
+  /* A sprite rides its lift above where it would otherwise centre. The lift is a
+     share of the sprite height rather than a fixed distance, so it holds at
+     every multiple. Claims and everything else read separate values, which is
+     what lets the slider be pointed at one or at both. */
+  .cell img{display:block; pointer-events:none; max-width:100%; height:auto;
+            transform:translateY(calc(var(--lift-rank, 0) * -1%))}
+  .cell img.claim{transform:translateY(calc(var(--lift-claim, 0) * -1%))}
+  /* The preview tints a square rather than repainting it, so the piece standing
+     there stays readable and the board keeps its own color underneath. */
+  .cell.take::after{content:''; position:absolute; inset:0; pointer-events:none;
+                    background:rgba(244,238,220,.30)}
+  .cell.die::after{content:''; position:absolute; inset:0; pointer-events:none;
+                   background:rgba(192,80,56,.42)}
+  .cell.lastmv{outline:var(--line) solid var(--gold); outline-offset:calc(-1 * var(--line))}
+  /* Open ground, drawn on the board. Extinguishing is where most of the land
+     comes from and it is the one thing you cannot read at a glance, so a band
+     down to two squares of open ground is marked amber and one is marked red,
+     since at one it can no longer be saved. */
+  .cell.shaky{box-shadow:inset 0 0 0 var(--line) rgba(232,180,92,.55)}
+  .cell.doomed{box-shadow:inset 0 0 0 var(--line) rgba(206,64,44,.95)}
+  .cell.deusmode.playable:hover{outline-color:var(--white)}
+
+  /* ---- panels ---- */
+  .panel{background:var(--panel); border:2px solid var(--line); padding:13px; margin-bottom:12px}
+  .panel h2{font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:var(--dim);
+            margin:0 0 9px; font-weight:700}
+  .turnrank{color:var(--gold)}
+  .turnrank.deus{color:var(--ink)}
+
+  .score{display:flex; gap:8px}
+  .sc{flex:1; text-align:center; padding:8px 4px; background:#131118; border:2px solid var(--line)}
+  .sc.act{border-color:var(--gold)}
+  .sc .n{font-size:26px; font-weight:700; line-height:1}
+  .sc .l{font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.1em; margin-top:3px}
+  .sc .sub2{font-size:10px; color:var(--dim); margin-top:2px; min-height:13px}
+  .sc.p1 .n{color:var(--red)} .sc.p2 .n{color:var(--white)}
+
+  .cycle{display:flex; gap:4px}
+  .cyc{flex:1; text-align:center; padding:5px 1px 3px; background:#131118; border:2px solid var(--line)}
+  .cyc.now{border-color:var(--gold)}
+  .cyc img{margin:0 auto; display:block}
+  .cyc .who{font-size:9px; letter-spacing:.05em; text-transform:uppercase; color:var(--dim); margin-top:2px}
+  .cyc.now .who{color:var(--gold)}
+
+  .rules{font-size:12.5px; color:#c9c4bc}
+  .rules ol{padding-left:16px; margin:0}
+  .rules li{margin-bottom:6px}
+  .rules b{color:var(--ink)}
+  .note{font-size:11.5px; color:var(--dim); margin-top:8px; line-height:1.6}
+
+  label{display:flex; align-items:center; gap:8px; font-size:12.5px; margin-bottom:8px; color:#c9c4bc}
+  select,button{font:inherit; font-size:13px; background:#131118; color:var(--ink);
+                border:2px solid var(--line); padding:6px 9px; border-radius:0}
+  select{flex:1; min-width:0}
+  button{cursor:pointer; width:100%; font-weight:700; margin-bottom:8px}
+  button:hover:not(:disabled){border-color:var(--gold)}
+  button:disabled{opacity:.4; cursor:default}
+  button.primary{background:var(--gold); color:#15131a; border-color:var(--gold)}
+  button.deus{background:#2a2113; border-color:#6d5822; color:var(--gold)}
+  button.deus.on{background:var(--gold); color:#15131a}
+  input[type=checkbox]{accent-color:var(--gold); width:15px; height:15px}
+  input[type=range]{accent-color:var(--gold); flex:1; min-width:0; height:16px}
+  .lifted{min-width:20px; text-align:right; color:var(--gold);
+          font-variant-numeric:tabular-nums; font-size:12px}
+  #msg{min-height:21px; font-size:13px; color:var(--gold); margin-top:8px; font-weight:700}
+
+  /* ---- chronicle ---- */
+  .loghead{display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none}
+  .loghead h2{margin:0}
+  .caret{color:var(--dim); font-size:10px}
+  .caret.shut{transform:rotate(-90deg)}
+  /* A fixed height, not a maximum. The chronicle would otherwise grow with every
+     move and shove the panels below it down the page while a replay ran. */
+  #log{height:196px; overflow-y:auto; margin-top:9px; font-size:12px; font-variant-numeric:tabular-nums}
+  #log.shut{display:none}
+  #log::-webkit-scrollbar{width:8px}
+  #log::-webkit-scrollbar-thumb{background:#3b3546}
+  .lg{display:flex; align-items:center; gap:6px; padding:2px 4px}
+  .lg:nth-child(odd){background:rgba(255,255,255,.035)}
+  .lg .ln{color:#5d5768; min-width:17px; text-align:right}
+  .lg img{flex:none}
+  .lg .sq{font-weight:700; min-width:25px}
+  .lg .sq.p1{color:var(--red)} .lg .sq.p2{color:var(--white)}
+  .lg .ev{color:var(--dim); font-size:11px}
+  .lg .ev b{color:var(--gold); font-weight:700}
+  .lg.deusrow{background:rgba(217,180,92,.12)}
+  .lg.atnow{outline:2px solid var(--gold); outline-offset:-2px}
+  .logempty{color:var(--dim); font-size:12px; padding:3px 4px}
+  .row{display:flex; gap:6px; margin-top:8px; align-items:center}
+  .row button{margin:0; flex:1; padding:5px 6px; font-size:12px}
+  .row .pos{flex:1; font-size:11px; color:var(--dim); text-align:center;
+            font-variant-numeric:tabular-nums}
+  #replaybar{border-top:2px solid var(--line); margin-top:9px; padding-top:3px}
+
+  /* ---- playing someone far away ----
+     The lobby takes the whole window rather than standing over the board. There
+     is no game to look at while it is open, and holding it to the square meant
+     that a menu with something to report was taller than the space it had. It
+     takes clicks, unlike the outcome plaque, so nothing behind it can be pressed
+     by accident. */
+  #lobby{position:fixed; inset:0; z-index:80; display:flex; flex-direction:column;
+         align-items:center; justify-content:center; justify-content:safe center;
+         gap:10px; padding:16px; overflow:auto; background:rgba(21,19,26,.96)}
+  #lobby[hidden]{display:none}
+  .lobbybox{width:min(320px,100%); flex:none; background:var(--panel);
+            border:2px solid var(--line); padding:14px}
+  .lobbybox[hidden]{display:none}
+  .lobbybox h2{font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:var(--dim);
+               margin:0 0 11px; font-weight:700}
+  .lobbybox input[type=text]{flex:1; min-width:0; font:inherit; font-size:13px;
+        background:#131118; color:var(--ink); border:2px solid var(--line); padding:6px 9px}
+  .lobbybox input[type=text]:focus{outline:none; border-color:var(--gold)}
+  .lobbybox input#netcode{letter-spacing:.14em; text-transform:uppercase}
+  .lobbynote{font-size:11px; line-height:1.6; color:var(--dim); margin:2px 0 10px}
+  .lobbybox hr{border:0; border-top:2px solid var(--line); margin:12px 0}
+  /* Whatever went wrong is said above the menu and stays there until the next
+     thing is chosen, so a game that stopped never looks like a game that ended. */
+  .lobbyflag{width:min(320px,100%); flex:none; background:#2a1512; border:2px solid var(--red);
+             color:#f1ddd7; font-size:12px; line-height:1.6; padding:10px 12px}
+  .lobbyflag[hidden]{display:none}
+  .waiting{text-align:center; color:var(--gold); font-weight:700;
+           animation:waiting 1.6s ease-in-out infinite alternate}
+  @keyframes waiting{from{opacity:.45} to{opacity:1}}
+  .lobbycode{font-size:27px; letter-spacing:.2em; font-weight:700; color:var(--gold);
+             text-align:center; padding:10px 0 4px; font-variant-numeric:tabular-nums;
+             word-break:break-all}
+  .lobbycode[hidden]{display:none}
+  /* The clocks borrow the piece counters, so one column reads the same way twice. */
+  .sc.low .n{color:var(--red)}
+  .sc .l.who{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+
+  footer{grid-area:foot; margin-top:18px; padding-top:14px; border-top:2px solid var(--line);
+         font-size:11px; line-height:1.8; color:var(--dim); text-align:center}
+  /* a note that belongs to the checkbox above it, lined up under its label */
+  .subnote{margin:-3px 0 11px 23px; font-size:11px; line-height:1.55; color:var(--dim)}
+  footer b{color:#c9c4bc}
+  footer a{color:var(--gold)}
+
+  /* ---- narrow screens: Ivy hovers at the bottom left ---- */
+  @media (max-width:900px){
+    .wrap{grid-template-columns:1fr;
+          grid-template-areas:"board" "deus" "side" "foot"}
+    .boardcol.stick{position:static}      /* folded layout scrolls as one piece */
+    .askpanel{order:1} .deuspanel{order:0}
+    .ivy{position:fixed; left:4px; bottom:-5vh; z-index:40; pointer-events:none; top:auto}
+    /* Sized against the viewport rather than in pixels, so she keeps the same
+       share of the screen on a small phone and a large one. */
+    .ivy img{height:46vh; width:auto; max-width:60vw}
+    .ivy .name{display:none}
+    /* What she says has to survive the fold, so it becomes a speech bubble beside
+       her rather than a line under her feet. The width is measured against the
+       room left to her right, so a long sentence never runs off the screen. The
+       tail is two triangles, a black one and a white one three pixels along, which
+       is how a pixel outline is drawn. It disappears when she is quiet. */
+    /* What she says sits beside her head, in the same gold it uses under her on
+       a wide screen and with nothing added to it. */
+    .ivy .mood{display:block; position:absolute; left:calc(100% - 30px); bottom:72%;
+               width:max-content; max-width:calc(100vw - 100% + 20px);
+               text-align:left; font-size:14px; line-height:1.4; font-weight:700;
+               color:var(--gold); background:none; border:0; padding:0;
+               text-shadow:none; pointer-events:none}
+    .ivy .mood:empty{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="ivy">
+    <img id="ivyart" src="Assets/Ivy_Idle.png" alt="Ivy">
+    <div class="name">Ivy</div>
+    <div class="mood" id="ivymood"></div>
+  </div>
+
+  <div class="boardcol">
+    <h1>Choral</h1>
+    <div class="sub">A Denlish game of Strategy.</div>
+    <div class="boardwrap">
+      <div id="advicering" hidden></div>
+      <div id="board"></div>
+      <div id="over" hidden>
+        <div class="banner" id="overbanner"></div>
+        <div class="overscore" id="overscore"></div>
+        <div class="overask" id="overask" hidden></div>
+        <div class="overbtns">
+          <button class="rematch" id="harder" hidden>Yes, harder</button>
+          <button class="rematch" id="rematch">Rematch</button>
+        </div>
+      </div>
+      <div id="lobby" hidden>
+        <div class="lobbyflag" id="lobbyflag" hidden></div>
+
+        <div class="lobbybox" id="lobbymenu">
+          <h2>Play someone far away</h2>
+          <label>Name <input type="text" id="netname" maxlength="16" placeholder="What they will see"></label>
+          <label>Board <select id="netboard">
+            <option value="9" selected>9 by 9</option>
+            <option value="7">7 by 7</option>
+            <option value="11">11 by 11</option>
+          </select></label>
+          <div class="lobbynote">Red moves first. Each side holds ten minutes, and placing a
+            piece returns two seconds. Run the pool down and the game is lost.</div>
+          <button id="netseek">Seek a random game</button>
+          <button id="nethost">Host a private game</button>
+          <hr>
+          <label>Code <input type="text" id="netcode" maxlength="8" placeholder="ABCD1234"></label>
+          <button id="netjoin">Join a private game</button>
+          <hr>
+          <button id="netback">Go back to Ivy</button>
+        </div>
+
+        <div class="lobbybox" id="lobbywait" hidden>
+          <h2 id="waithead">Waiting</h2>
+          <div class="waiting" id="waitline"></div>
+          <div class="lobbycode" id="waitcode" hidden></div>
+          <div class="lobbynote" id="waitnote"></div>
+          <button id="netcancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <div id="msg"></div>
+  </div>
+
+  <div class="deuscol">
+    <div class="panel askpanel">
+      <details class="ask" id="askmenu">
+        <summary>Ask Ivy</summary>
+        <button id="askUndo">If I can undo my move</button>
+        <button id="askSwap">If we can swap colors</button>
+        <button id="askHint">For a good move</button>
+        <button id="askNear">If I can play with someone else (nearby)</button>
+        <button id="askFar">If I can play with someone else (far away)</button>
+      </details>
+    </div>
+    <div class="panel deuspanel">
+      <button class="deus" id="deusbtn">Play Deus</button>
+      <div class="note" id="deusnote">Deus counts as any rank and doubles all land joined to them.</div>
+    </div>
+  </div>
+
+  <div class="sidecol">
+    <div class="panel" id="netpanel" hidden>
+      <h2>Clocks</h2>
+      <div class="score">
+        <div class="sc" id="clkA"><div class="n" id="tA">10:00</div><div class="l who" id="lA">You</div></div>
+        <div class="sc" id="clkB"><div class="n" id="tB">10:00</div><div class="l who" id="lB">Them</div></div>
+      </div>
+      <div class="note" id="netnote"></div>
+      <div class="row">
+        <button id="netresign">Resign</button>
+        <button id="netleave">Leave</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Pieces</h2>
+      <div class="score">
+        <div class="sc p1" id="sc1"><div class="n" id="n1">0</div><div class="l" id="l1">You</div><div class="sub2" id="c1"></div></div>
+        <div class="sc p2" id="sc2"><div class="n" id="n2">0</div><div class="l" id="l2">Ivy</div><div class="sub2" id="c2"></div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Rank <span class="turnrank" id="turnrank"></span></h2>
+      <div class="cycle" id="cycle"></div>
+    </div>
+
+    <div class="panel">
+      <div class="loghead" id="loghead">
+        <h2>Chronicle</h2><span class="caret" id="caret">&#9660;</span>
+      </div>
+      <div id="log"></div>
+      <div class="row">
+        <button id="export">Export</button>
+        <button id="importbtn">Import</button>
+        <input type="file" id="importfile" accept=".json,application/json" hidden>
+      </div>
+      <div id="replaybar" hidden>
+        <div class="row">
+          <button id="rwStart">&#9198;</button>
+          <button id="rwPrev">&#9664;</button>
+          <button id="rwAuto">Play</button>
+          <button id="rwNext">&#9654;</button>
+          <button id="rwEnd">&#9197;</button>
+        </div>
+        <div class="row">
+          <span class="pos" id="rwPos">0 of 0</span>
+          <button id="rwExit">Leave replay</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Rules</h2>
+      <div class="rules"><ol>
+        <li>Place one piece on any empty square. The turn sets the rank: <b>Laic, Baron, Duke</b>, repeating.</li>
+        <li>Pieces that touch form a <b>band</b>. The empty squares beside it are its <b>open ground</b>. Take the last one and the whole band is <b>extinguished</b>, and its squares become your <b>claimed land</b> at <b>one point</b> each. A band down to one square of open ground cannot be saved.</li>
+        <li><b>Surround</b> up to <b>four</b> empty squares with your own pieces. Map edges count as wall. With <b>all three ranks</b> standing around it, you found a <b>town</b> worth <b>two points</b> a square.</li>
+        <li><b>Deus</b> replaces the turn rank. They count as any rank and double all land joined to them. They are extinguished like anyone, and they must be sent out <b>before your last <span id="deadlinen">10</span> pieces</b>.</li>
+        <li>Pieces are limited. When both sides run out, the larger holding wins.</li>
+      </ol></div>
+      <div class="note">Claim the land a Deus lands on and they will be extinguished.</div>
+    </div>
+
+    <div class="panel">
+      <h2>Game</h2>
+      <label>Banner <select id="banner">
+        <option value="1" selected>Red, moves first</option>
+        <option value="2">White, moves second</option>
+      </select></label>
+      <label>Board <select id="size"><option value="9" selected>9 by 9</option><option value="7">7 by 7</option><option value="11">11 by 11</option></select></label>
+      <label id="difflabel">Ivy <select id="diff">
+        <option value="0" selected>Ivy (Showing Game to Seam for first time)</option>
+        <option value="1">Ivy (Trying harder)</option>
+        <option value="2">Ivy (Locked in)</option>
+      </select></label>
+      <label><input type="checkbox" id="music" checked> Music</label>
+      <label><input type="checkbox" id="preview" checked> Show the land a piece would claim</label>
+      <div class="subnote">Hover a square to see what it would take. Pale means land claimed. Red means pieces extinguished.</div>
+      <label><input type="checkbox" id="danger" checked> Show piece danger</label>
+      <div class="subnote">Amber marks a band down to two squares of open ground. Red marks one.</div>
+      <div id="liftrow" hidden>
+        <label>Raise
+          <input type="range" id="lift" min="0" max="40" step="1" value="0">
+          <span class="lifted" id="liftval">0</span>
+        </label>
+        <label><input type="checkbox" id="liftclaims" checked> Raise claims only</label>
+      </div>
+      <button class="primary" id="new">New game</button>
+    </div>
+  </div>
+
+  <footer>
+    <div>Music by <b>Lemonadey</b>, used with permission.</div>
+  </footer>
+</div>
+
+<audio id="track" src="Assets/Choral.mp3" loop preload="metadata"></audio>
+
+<script>
+"use strict";
+/* ============================== engine ============================== */
+const CAP=4, NRANK=3, NEED=3, LANDVAL=2, DEUS=3;
+const EMPTY=0, PIECE=1, LAND=2;
+const NOWHERE=Object.freeze([]);      // shared empty result, so a quiet move allocates nothing
+
+/* Shared scratch buffers stamped with a version counter. Bumping a counter
+   costs one integer where clearing an array costs a pass over it, and strength
+   here is simulations per second. */
+let _sc=null;
+function scratch(cc){
+  if(!_sc || _sc.cc<cc){
+    _sc={cc,
+      gm:new Int32Array(cc), gl:new Int32Array(cc), rs:new Int32Array(cc),
+      dm:new Int32Array(cc), stk:new Int32Array(cc+8), mv:new Int32Array(cc),
+      grp:new Int32Array(cc), comp:new Int32Array(cc), aud:new Int32Array(cc),
+      vGm:0, vGl:0, vRs:0, vDm:0, vAud:0};
+  }
+  return _sc;
+}
+
+function makeCfg(n){
+  const cc=n*n, nbr=new Array(cc);
+  for(let i=0;i<cc;i++){
+    const r=(i/n)|0, c=i%n, a=[];
+    if(r) a.push(i-n);
+    if(r<n-1) a.push(i+n);
+    if(c) a.push(i-1);
+    if(c<n-1) a.push(i+1);
+    nbr[i]=a;
+  }
+  return {n,cc,nbr};
+}
+
+class Game{
+  constructor(cfg,budget){
+    this.cfg=cfg;
+    this.budget = budget || Math.round(cfg.cc/2.7);
+    this.own=new Int8Array(cfg.cc);
+    this.kind=new Int8Array(cfg.cc);
+    this.shp=new Int8Array(cfg.cc).fill(-1);
+    this.claimCell=new Uint8Array(cfg.cc);   // town land, against land taken by extinguishing
+    this.ply=0; this.caps=[0,0]; this.stones=[0,0]; this.score=[0,0];
+    this.passes=0; this.last=-1;
+    this.claims=[];                          // {cells, wall, owner}
+    this.deusCell=[-1,-1];                   // -1 means unplayed or extinguished
+    this.deusUsed=[false,false];
+  }
+  clone(){
+    const g=Object.create(Game.prototype);
+    g.cfg=this.cfg; g.budget=this.budget;
+    g.own=this.own.slice(); g.kind=this.kind.slice(); g.shp=this.shp.slice();
+    g.claimCell=this.claimCell.slice();
+    g.ply=this.ply; g.caps=this.caps.slice(); g.stones=this.stones.slice();
+    g.score=this.score.slice(); g.passes=this.passes; g.last=this.last;
+    g.claims=this.claims.slice();            // a claim never changes once sealed, so share it
+    g.deusCell=this.deusCell.slice(); g.deusUsed=this.deusUsed.slice();
+    return g;
+  }
+  left(p){ return this.budget-this.stones[p-1]; }
+  canPlay(p){ return this.left(p)>0; }
+  curRank(){ return this.ply%NRANK; }
+  toMove(){ return 1+(this.ply&1); }
+  hasDeus(p){ return !this.deusUsed[p-1]; }
+  /* Deus has to be out before your last third of pieces, which is ten on a nine
+     by nine board. Without a deadline the right play was always to sit on them
+     and send them out on the final move, collecting the doubling with no turns
+     left for anyone to hunt them. That line beat the same brain playing freely
+     84.8% of the time, so the timing had no decision left in it. Taking a share
+     of the pieces rather than a fixed count keeps the squeeze even on a smaller
+     board, where ten would have been most of the game. */
+  deadline(){ return Math.round(this.budget/3); }
+  canDeus(p){ return this.hasDeus(p) && this.left(p) > this.deadline(); }
+
+  /* Liberties of the band holding i, with its members written into out. This is
+     the hottest function in the search, called for every candidate square, so
+     it reads the stamped buffers rather than allocating sets. */
+  groupLibs(i,out){
+    const S=scratch(this.cfg.cc), nbr=this.cfg.nbr, me=this.own[i];
+    const gm=++S.vGm, gl=++S.vGl;
+    let sp=0, libs=0, cnt=0;
+    S.stk[sp++]=i; S.gm[i]=gm;
+    while(sp>0){
+      const j=S.stk[--sp];
+      if(out) out[cnt]=j;
+      cnt++;
+      const a=nbr[j];
+      for(let t=0;t<a.length;t++){
+        const m=a[t];
+        if(this.kind[m]===EMPTY){ if(S.gl[m]!==gl){ S.gl[m]=gl; libs++; } }
+        else if(this.kind[m]===PIECE && this.own[m]===me && S.gm[m]!==gm){ S.gm[m]=gm; S.stk[sp++]=m; }
+      }
+    }
+    return {libs,n:cnt};
+  }
+  legal(i){
+    if(this.kind[i]!==EMPTY) return false;
+    const nb=this.cfg.nbr[i];
+    for(let t=0;t<nb.length;t++) if(this.kind[nb[t]]===EMPTY) return true;   // fast path
+    const me=this.toMove(), S=scratch(this.cfg.cc);
+    this.own[i]=me; this.kind[i]=PIECE;
+    const kill=[];
+    for(let t=0;t<nb.length;t++){
+      const m=nb[t];
+      if(this.kind[m]===PIECE && this.own[m]!==me){
+        const r=this.groupLibs(m,S.grp);
+        if(r.libs===0) for(let q=0;q<r.n;q++) kill.push(S.grp[q]);
+      }
+    }
+    const so=[],sk=[];
+    for(let q=0;q<kill.length;q++){ const j=kill[q]; so.push(this.own[j]); sk.push(this.kind[j]); this.own[j]=me; this.kind[j]=LAND; }
+    const ok=this.groupLibs(i).libs>0;
+    /* Undone back to front, and the order matters. Two neighbours can belong to
+       the same band, so a square can be listed twice, and the second save holds
+       what the first change wrote. Undoing forward made that permanent, handing
+       a band to the checker without a move ever being played. */
+    for(let q=kill.length-1;q>=0;q--){ this.own[kill[q]]=so[q]; this.kind[kill[q]]=sk[q]; }
+    this.own[i]=0; this.kind[i]=EMPTY;
+    return ok;
+  }
+  movesInto(buf){
+    let n=0;
+    for(let i=0;i<this.cfg.cc;i++) if(this.kind[i]===EMPTY && this.legal(i)) buf[n++]=i;
+    return n;
+  }
+  moves(){
+    const S=scratch(this.cfg.cc), n=this.movesInto(S.mv), out=new Array(n);
+    for(let i=0;i<n;i++) out[i]=S.mv[i];
+    return out;
+  }
+  over(){
+    if(this.passes>=2) return true;
+    if(!this.canPlay(1)&&!this.canPlay(2)) return true;
+    for(let i=0;i<this.cfg.cc;i++) if(this.kind[i]===EMPTY) return false;
+    return true;
+  }
+  /* The realm spreads from Deus through anything you own, pieces as well as
+     land, and every land square it reaches counts double. Chaining through land
+     alone held the bonus to 1.4 points in 42.7, since land sits in scattered
+     pockets. Running it through pieces makes one connected domain worth
+     building. Marks S.dm[i] with the version it returns. */
+  doubledStamp(p){
+    const S=scratch(this.cfg.cc), ver=++S.vDm, lc=this.deusCell[p-1];
+    if(lc<0) return -1;
+    const gm=++S.vGm;
+    let sp=0; S.stk[sp++]=lc; S.gm[lc]=gm;
+    while(sp>0){
+      const j=S.stk[--sp], a=this.cfg.nbr[j];
+      for(let t=0;t<a.length;t++){
+        const m=a[t];
+        if(S.gm[m]===gm || this.own[m]!==p || this.kind[m]===EMPTY) continue;
+        S.gm[m]=gm; S.stk[sp++]=m;
+        if(this.kind[m]===LAND) S.dm[m]=ver;
+      }
+    }
+    return ver;
+  }
+  doubledSet(p){                       // allocating form, used only by the UI
+    const out=new Set(), ver=this.doubledStamp(p);
+    if(ver<0) return out;
+    const S=scratch(this.cfg.cc);
+    for(let i=0;i<this.cfg.cc;i++) if(S.dm[i]===ver) out.add(i);
+    return out;
+  }
+  rescore(){
+    const S=scratch(this.cfg.cc);
+    this.score=[0,0];
+    for(let p=1;p<=2;p++){
+      const ver=this.doubledStamp(p);
+      for(let i=0;i<this.cfg.cc;i++){
+        if(this.kind[i]===LAND && this.own[i]===p){
+          const base=this.claimCell[i]?LANDVAL:1;
+          this.score[p-1]+= (ver>=0 && S.dm[i]===ver)?base*2:base;
+        }
+      }
+    }
+  }
+  play(i, asDeus){
+    const me=this.toMove();
+    if(i<0){ this.ply++; this.passes++; return {claimed:[],killed:[],deusLost:0,extinct:NOWHERE}; }
+    if(asDeus && !this.canDeus(me)) asDeus=false;   // the deadline holds even if a caller forgets
+    this.passes=0; this.stones[me-1]++;
+    this.own[i]=me; this.kind[i]=PIECE;
+    this.shp[i]= asDeus ? DEUS : this.curRank();
+    if(asDeus){ this.deusCell[me-1]=i; this.deusUsed[me-1]=true; }
+    this.ply++; this.last=i;
+    const killed=[]; let deusLost=0, extinct=null;
+    const S=scratch(this.cfg.cc);
+    for(const m of this.cfg.nbr[i]){
+      if(this.kind[m]===PIECE && this.own[m]!==me){
+        const r=this.groupLibs(m,S.grp);
+        if(r.libs===0){
+          for(let q=0;q<r.n;q++){
+            const j=S.grp[q];
+            // Where a Deus goes out is reported rather than stored on the board.
+            // The search clones a position thousands of times a move, and this
+            // matters to nobody but the screen, so the list is built only on the
+            // rare move that puts one out.
+            if(this.shp[j]===DEUS){
+              const side=this.own[j];            // read before the ground changes hands
+              this.deusCell[side-1]=-1; deusLost++;
+              (extinct||(extinct=[])).push({c:j, side});
+            }
+            this.own[j]=me; this.kind[j]=LAND; this.shp[j]=-1; killed.push(j);
+          }
+          this.caps[me-1]+=r.n;
+        }
+      }
+    }
+    const claimed=this.resolve(me,[i,...killed]);
+    this.rescore();
+    return {claimed,killed,deusLost,extinct:extinct||NOWHERE};
+  }
+  /* Each flood carries its own number. One past the cap still walks out the rest
+     of its ground, so no later flood starts inside the same clump, and ground
+     walked by a different flood counts as an opening. Reading it as a wall let a
+     fragment of open ground claim squares that were never surrounded. */
+  resolve(me,near){
+    const {nbr}=this.cfg, out=[], starts=[];
+    const S=scratch(this.cfg.cc), ver=++S.vRs, seen=S.rs, comp=S.comp;
+    let flood=0;
+    for(const at of near){
+      if(this.kind[at]===EMPTY) starts.push(at);
+      for(const m of nbr[at]) if(this.kind[m]===EMPTY) starts.push(m);
+    }
+    for(const s of starts){
+      if(seen[s]===ver||this.kind[s]!==EMPTY) continue;
+      const mine=++flood;
+      const stack=[s], reg=[]; seen[s]=ver; comp[s]=mine;
+      let sealed=true, big=false, wild=false, ranks=0;   // ranks held as a 3 bit mask
+      const wall=new Set();
+      while(stack.length){
+        const j=stack.pop(); reg.push(j);
+        if(reg.length>CAP){ big=true; stack.push(j); break; }   // hand j back so the walk finishes it
+        for(const m of nbr[j]){
+          if(this.kind[m]===EMPTY){
+            if(seen[m]!==ver){ seen[m]=ver; comp[m]=mine; stack.push(m); }
+            else if(comp[m]!==mine) sealed=false;      // this clump opens into ground already walked
+          }
+          else if(this.own[m]!==me) sealed=false;
+          else if(this.kind[m]===PIECE){
+            if(this.shp[m]===DEUS) wild=true;          // stands in for any rank
+            else ranks|=1<<this.shp[m];
+            wall.add(m);
+          }
+        }
+      }
+      if(big){ while(stack.length){ const j=stack.pop();
+          for(const m of nbr[j]) if(this.kind[m]===EMPTY&&seen[m]!==ver){ seen[m]=ver; comp[m]=mine; stack.push(m); } }
+        continue; }
+      const distinct=(ranks&1)+((ranks>>1)&1)+((ranks>>2)&1);
+      if(sealed && distinct+(wild?1:0)>=NEED){
+        for(const j of reg){ this.own[j]=me; this.kind[j]=LAND; this.shp[j]=-1; this.claimCell[j]=1; }
+        this.claims.push({cells:reg.slice(),wall:[...wall],owner:me});
+        out.push(...reg);
+      }
+    }
+    return out;
+  }
+  peek(i,asDeus){
+    const g=this.clone(), me=this.toMove(), b=g.score[me-1];
+    const r=g.play(i,asDeus);
+    return {gain:g.score[me-1]-b, claimed:r.claimed, killed:r.killed};
+  }
+}
+
+/* ================================ Ivy ================================ */
+function candidates(g,mv){
+  mv=mv||g.moves();
+  const out=[];
+  for(const i of mv){
+    if(g.cfg.nbr[i].length<4){ out.push(i); continue; }
+    for(const m of g.cfg.nbr[i]) if(g.kind[m]!==EMPTY){ out.push(i); break; }
+  }
+  return out.length?out:mv;
+}
+function bestGrab(g,mv){
+  let bg=0,best=-1;
+  for(const i of candidates(g,mv)){ const {gain}=g.peek(i); if(gain>bg){bg=gain;best=i;} }
+  return {gain:bg,move:best};
+}
+function evalMove(g,i,me,lookahead,asDeus){
+  const t=g.clone(), before=t.score[me-1];
+  t.play(i,asDeus);
+  const gain=t.score[me-1]-before;
+  let reply=0;
+  if(lookahead&&!t.over()) reply=bestGrab(t).gain;
+  return gain*3 - reply*2.6 + Math.random()*0.2;
+}
+function pickBy(g,lookahead){
+  const mv=g.moves(); if(!mv.length) return -1;
+  const me=g.toMove(), cand=candidates(g,mv);
+  let best=-1,bv=-Infinity,bDeus=false;
+  for(const i of cand){
+    let v=evalMove(g,i,me,lookahead,false);
+    if(v>bv){bv=v;best=i;bDeus=false;}
+    if(g.canDeus(me)){
+      v=evalMove(g,i,me,lookahead,true);
+      if(v>bv){bv=v;best=i;bDeus=true;}
+    }
+  }
+  if(best<0) return mv[(Math.random()*mv.length)|0];
+  return bDeus?{cell:best,deus:true}:best;
+}
+const pickSteady = g => pickBy(g,false);
+
+/* MCTS with RAVE, the recipe Go engines used before AlphaGo. Plain UCT credits
+   a good square only to the branch that opened with it. RAVE also credits every
+   branch where that square came later from the same side, so one simulation
+   teaches dozens of siblings. The estimate is biased, because move order
+   matters, so it is blended out as real visits arrive.
+   Measured at equal time on 9 by 9: 81 percent against plain UCT. Alpha beta
+   reached 37 percent, since it only got to depth 2 in the same time. */
+const RAVE_BIAS = 700;         // visits at which real stats and AMAF weigh the same
+const FAR = 1<<30;
+
+function raveSelect(node){
+  const ln=Math.log(node.n+1);
+  let best=null, bs=-Infinity;
+  for(const k of node.kids){
+    const q = k.n>0 ? k.w/k.n : 0.5;
+    let v;
+    if(k.rn>0){
+      const beta=Math.sqrt(RAVE_BIAS/(3*k.n+RAVE_BIAS));
+      v=(1-beta)*q + beta*(k.rw/k.rn);
+    } else v=q;
+    v += 1.2*Math.sqrt(ln/Math.max(1,k.n));
+    v += k.prior/(1+k.n);                        // progressive bias
+    if(v>bs){ bs=v; best=k; }
+  }
+  return best;
+}
+/* AMAF is keyed by square and by whether Deus made the move. Keying on the
+   square alone let sending Deus to a square inherit the credit earned by
+   sending a rank there, which put them on the board at ply 4 on average and
+   lost them in every game. */
+function amafIx(cc,player,cell,deus){ return (deus?3*cc:0)+player*cc+cell; }
+function markAmaf(first,cc,player,cell,ply,deus){
+  if(cell<0) return;
+  const ix=amafIx(cc,player,cell,deus);
+  if(ply<first[ix]) first[ix]=ply;
+}
+
+/* Where Deus is worth considering. Offering them on every candidate square
+   doubled the action set with losing options and buried the few good ones in
+   noise. They are offered where they close a town right now, which is their
+   wildcard use, or beside holdings once there is land worth doubling. */
+function deusActions(g,cand,me,deep){
+  if(!g.canDeus(me)) return [];
+  const out=[], developed=g.stones[me-1]>=5, hasLand=g.claims.length>0;
+  for(const c of cand){
+    let touch=false;
+    const a=g.cfg.nbr[c];
+    for(let t=0;t<a.length;t++){ const m=a[t]; if(g.own[m]===me&&g.kind[m]!==EMPTY){ touch=true; break; } }
+    let take = developed && touch && hasLand;
+    if(!take && deep){                                  // root only: are they the missing rank?
+      take = g.peek(c,true).gain > g.peek(c,false).gain;
+    }
+    if(take) out.push({cell:c,deus:true});
+  }
+  return out;
+}
+/* The one square keeping a band alive, read out of the scratch buffer that
+   groupLibs just filled. It must be read before any call to legal(). */
+function soleLiberty(s,count){
+  const S=scratch(s.cfg.cc);
+  for(let q=0;q<count;q++){
+    const j=S.grp[q], a=s.cfg.nbr[j];
+    for(let t=0;t<a.length;t++) if(s.kind[a[t]]===EMPTY) return a[t];
+  }
+  return -1;
+}
+/* Cheap rollout policy read off the neighbourhood of the last move: answer or
+   deliver an atari, otherwise stay local. It measured level with uniform
+   rollouts at 50.2 percent over 200 games, and it makes Ivy look purposeful to
+   anyone watching her play. */
+function playoutMove(s,buf,n){
+  const last=s.last;
+  if(last>=0){
+    const S=scratch(s.cfg.cc), a=s.cfg.nbr[last];
+    for(let t=0;t<a.length;t++){
+      const m=a[t];
+      if(s.kind[m]===PIECE){
+        const r=s.groupLibs(m,S.grp);
+        if(r.libs===1){
+          const lib=soleLiberty(s,r.n);
+          if(lib>=0 && s.kind[lib]===EMPTY && s.legal(lib)) return lib;
+        }
+      }
+    }
+    if(Math.random()<0.65){
+      let c=0; const near=[];
+      for(let t=0;t<a.length;t++){ const m=a[t]; if(s.kind[m]===EMPTY && s.legal(m)) near[c++]=m; }
+      if(c>0) return near[(Math.random()*c)|0];
+    }
+  }
+  return buf[(Math.random()*n)|0];
+}
+
+/* Prior knowledge, injected the way a Go engine does it. Whether Deus can be
+   extinguished takes several moves to settle, and at roughly 1600 simulations
+   the tree runs two or three ply deep, so it never saw the end arriving and
+   lost them every time. Safety is taught here rather than searched: leaving
+   them short of open ground costs, and squeezing the rival Deus pays. */
+/* A Deus is worth the doubling they live to collect, and that is settled at the
+   end. Going out early buys only the wildcard town, and a long spell of being
+   hunted. Ivy once cashed four points on ply six and lost them on ply seventeen,
+   far past what the tree reads, so the exposure is priced here instead. */
+const DEUS_CARE={on:true, alone:3.5, pair:1.2, rim:1.5, breathe:0.35, exposure:0.08};
+
+/* How much of a side stands in danger. Extinguishing turns squares into land
+   rather than open ground, so taking a band never hands anyone room, and a band
+   down to one square can never be rescued. Two is one move from that. Ivy
+   watched her Deus and nothing else, and lost a band of thirteen a square at a
+   time with a rescue available on every turn. */
+function endangered(s, side){
+  const S=scratch(s.cfg.cc), ver=++S.vAud;
+  let doomed=0, shaky=0;
+  for(let i=0;i<s.cfg.cc;i++){
+    if(s.kind[i]!==PIECE || s.own[i]!==side || S.aud[i]===ver) continue;
+    const r=s.groupLibs(i,S.grp);
+    for(let q=0;q<r.n;q++) S.aud[S.grp[q]]=ver;
+    if(r.libs===1) doomed+=r.n;
+    else if(r.libs===2) shaky+=r.n;
+  }
+  return doomed + shaky*0.35;
+}
+const BAND_CARE={rescue:0.55, squeeze:0.35};
+
+function priorOf(s,a){
+  const me=s.toMove(), foe=3-me;
+  const foeDeusBefore = s.deusCell[foe-1]>=0 ? s.groupLibs(s.deusCell[foe-1]).libs : -1;
+  const myRiskBefore=endangered(s,me), foeRiskBefore=endangered(s,foe);
+  const t=s.clone(), before=t.score[me-1];
+  t.play(a.cell,a.deus);
+  // pulling your own men out of danger, and pushing theirs into it
+  let p0 = (myRiskBefore-endangered(t,me))*BAND_CARE.rescue
+         + (endangered(t,foe)-foeRiskBefore)*BAND_CARE.squeeze;
+  const rim = s.cfg.nbr[a.cell].length<4;
+  let p=p0 + (t.score[me-1]-before)*0.6 + ((a.deus?false:rim)?0.15:0);
+  const mine=t.deusCell[me-1];
+  if(mine>=0){
+    const gr=t.groupLibs(mine), libs=gr.libs;
+    if(libs<=1) p-=9; else if(libs===2) p-=3.5; else if(libs===3) p-=1;
+    if(a.deus && DEUS_CARE.on){
+      if(gr.n<=1) p-=DEUS_CARE.alone;          // a lone piece is the cheapest thing to shut in
+      else if(gr.n===2) p-=DEUS_CARE.pair;
+      if(rim) p-=DEUS_CARE.rim;                // a rim square has fewer sides to defend
+      p += Math.min(libs,6)*DEUS_CARE.breathe; // open ground around them is worth paying for
+      p -= t.left(me)*DEUS_CARE.exposure;      // every piece still to come is another turn hunted
+    }
+  }
+  const fl=t.deusCell[foe-1];
+  if(fl>=0 && foeDeusBefore>=0){
+    const after=t.groupLibs(fl).libs;
+    if(after<foeDeusBefore) p += (foeDeusBefore-after)*0.9 + (after<=2?2.5:0);
+  } else if(foeDeusBefore>=0 && fl<0) p += 7;      // extinguished them outright
+  return p;
+}
+
+function uct(g,ms){
+  const mv=g.moves();
+  if(!mv.length||!g.canPlay(g.toMove())) return -1;
+  const me=g.toMove(), cand=candidates(g,mv), cc=g.cfg.cc;
+  const acts=cand.map(c=>({cell:c,deus:false}));
+  for(const a of deusActions(g,cand,me,true)) acts.push(a);
+  if(acts.length===1) return acts[0].deus?{cell:acts[0].cell,deus:true}:acts[0].cell;
+
+  const root={act:null,par:null,mover:0,kids:[],untried:acts.slice(),w:0,n:0,rw:0,rn:0,prior:0};
+  const first=new Int32Array(6*cc), buf=new Int32Array(cc);
+  const t0=performance.now();
+  let sims=0;
+  while(performance.now()-t0<ms){
+    for(let rep=0;rep<6;rep++){
+      sims++;
+      let node=root; const s=g.clone();
+      first.fill(FAR);
+      while(!node.untried.length && node.kids.length){
+        node=raveSelect(node);
+        markAmaf(first,cc,s.toMove(),node.act.cell,s.ply,node.act.deus);
+        s.play(node.act.cell,node.act.deus);
+      }
+      if(node.untried.length){
+        const a=node.untried.splice((Math.random()*node.untried.length)|0,1)[0];
+        const mover=s.toMove();
+        const prior=priorOf(s,a);
+        markAmaf(first,cc,mover,a.cell,s.ply,a.deus);
+        s.play(a.cell,a.deus);
+        const nc=candidates(s,s.moves());
+        const nx=nc.map(c=>({cell:c,deus:false}));
+        for(const la of deusActions(s,nc,s.toMove(),false)) nx.push(la);
+        node.kids.push({act:a,par:node,mover,kids:[],untried:nx,w:0,n:0,rw:0,rn:0,prior});
+        node=node.kids[node.kids.length-1];
+      }
+      let guard=0;
+      while(!s.over()&&guard++<cc*3){
+        const p=s.toMove();
+        if(!s.canPlay(p)){ s.play(-1); continue; }
+        const n=s.movesInto(buf);
+        if(!n){ s.play(-1); continue; }
+        const c=playoutMove(s,buf,n);
+        // Deus is risked in a rollout only beside our own holdings, and only
+        // once there is land worth doubling. A flat 6 percent chance meant both
+        // sides threw them away in every simulation, so losing them read as free.
+        let asDeus=false;
+        if(s.canDeus(p) && s.claims.length){
+          const a2=s.cfg.nbr[c];
+          for(let t=0;t<a2.length;t++){ const m=a2[t];
+            if(s.own[m]===p && s.kind[m]!==EMPTY){ asDeus=Math.random()<0.25; break; } }
+        }
+        markAmaf(first,cc,p,c,s.ply,asDeus);
+        s.play(c,asDeus);
+      }
+      const d0=s.score[0]-s.score[1];
+      for(let c2=node;c2;c2=c2.par){
+        c2.n++;
+        if(c2.par){ const d=c2.mover===1?d0:-d0; c2.w += d>0?1:(d===0?0.5:0); }
+        for(const k of c2.kids){                      // AMAF credit to the siblings
+          if(k.act.cell<0) continue;
+          if(first[amafIx(cc,k.mover,k.act.cell,k.act.deus)]===FAR) continue;
+          const d=k.mover===1?d0:-d0;
+          k.rn++; k.rw += d>0?1:(d===0?0.5:0);
+        }
+      }
+    }
+  }
+  uct.lastSims=sims;
+  let best=null;
+  for(const k of root.kids) if(!best||k.n>best.n) best=k;
+  if(!best) return cand[0];
+  return best.act.deus?{cell:best.act.cell,deus:true}:best.act.cell;
+}
+/* Think time grows with the map. A rollout on 11 by 11 costs about 2.7 times
+   one on 9 by 9, so a flat 420ms bought roughly 360 rollouts on 9 by 9 and only
+   150 on 11 by 11, which is where a camped Deus is strongest. */
+const thinkMs = cc => Math.min(2400, Math.round(1150 * Math.pow(cc/81, 1.6)));
+const pickSharp = g => uct(g, thinkMs(g.cfg.cc));
+function pickGentle(g){
+  const mv=g.moves(); if(!mv.length) return -1;
+  if(Math.random()<0.45){ const b=bestGrab(g,mv); if(b.move>=0) return b.move; }
+  const cand=candidates(g,mv);
+  const c=cand[(Math.random()*cand.length)|0];
+  if(g.canDeus(g.toMove())&&Math.random()<0.08) return {cell:c,deus:true};
+  return c;
+}
+
+/* ================================ art ================================ */
+/* Every sprite is drawn at a whole number multiple of its own pixels. A shared
+   multiplier keeps a Laic and a Baron at the same pixel size even though their
+   files differ, and whole numbers are what keep the upscale free of blur. */
+const RANKNAME=['Laic','Baron','Duke','Deus'];
+const SPRITE=[
+  {file:'Laic',  w:29, h:35},
+  {file:'Baron', w:42, h:38},
+  {file:'Duke',  w:34, h:37},
+  {file:'Deus',  w:42, h:38}
+];
+const SPRITE_BOX = {w:42, h:38};          // the largest rank, used to set the shared multiplier
+/* Land art follows what a square is worth. Ground taken by extinguishing pays
+   one, a town pays two, and a Deus doubles whichever it is, so the tiers are
+   one, two and four. */
+const CLAIMART = {
+  1:{file:'Claim',  w:20, h:32},
+  2:{file:'Claim2', w:20, h:32},
+  4:{file:'Claim4', w:20, h:32}
+};
+const EXTINCT = {file:'Deus_Extinguished', w:42, h:38};
+const ART='Assets/';                      // every sprite lives beside this file under Assets
+const SIDE = p => p===1 ? 'R' : 'W';
+
+function preload(){
+  const names=[];
+  for(const s of SPRITE) names.push(s.file+'_R', s.file+'_W');
+  names.push('Ivy_Idle','Ivy_Thinking', EXTINCT.file+'_R', EXTINCT.file+'_W');
+  for(const v of [1,2,4]) names.push(CLAIMART[v].file+'_R', CLAIMART[v].file+'_W');
+  for(const n of names){ const im=new Image(); im.src=ART+n+'.png'; }
+}
+function pieceSrc(rank,owner){ return ART+SPRITE[rank].file+'_'+SIDE(owner)+'.png'; }
+function landSrc(owner,value){ return ART+CLAIMART[value].file+'_'+SIDE(owner)+'.png'; }
+/* A square where a Deus went out keeps the marker instead of the land tile, and
+   it is drawn in the color of the faction that lost them. */
+function extinctSrc(side){ return ART+EXTINCT.file+'_'+SIDE(side)+'.png'; }
+
+/* an <img> sized to a whole multiple of the sprite, for the strip and the log */
+function iconTag(rank,owner,mult){
+  const s=SPRITE[rank];
+  return `<img src="${pieceSrc(rank,owner)}" width="${s.w*mult}" height="${s.h*mult}" alt="${RANKNAME[rank]}">`;
+}
+
+/* ================================ UI ================================ */
+const boardEl=document.getElementById('board'), msgEl=document.getElementById('msg');
+let cfg, game, cells=[], imgs=[], busy=false, deusMode=false, mult=1;
+let extinctAt=new Map();        // square where a Deus went out, to the faction that lost them
+let replay=null;                // {moves, at} while a chronicle is being watched
+/* Ivy thinks behind a timer. Starting a new game, changing the map or loading a
+   chronicle while she is mid turn would otherwise let that timer land a move on
+   a board it was never played on, and the move would go unrecorded. Each fresh
+   position takes a number, and a turn that wakes to find the number changed
+   stands down. */
+let gen=0;
+/* Ivy pulls a face when a turn goes badly for her: a swing of six points or
+   more to the player, or her Deus taken. It holds for a moment, then she goes
+   back to watching the board. */
+const SWING=6;
+let ivyMood='idle', moodTimer=null;
+function setMood(mood, holdMs){
+  ivyMood=mood;
+  if(moodTimer){ clearTimeout(moodTimer); moodTimer=null; }
+  if(holdMs) moodTimer=setTimeout(()=>{ moodTimer=null; ivyMood='idle'; render(); }, holdMs);
+}
+
+/* What Ivy says under her picture. Given no time it stays until something
+   clears it, which is what advice needs. */
+let ivySay=null, sayTimer=null;
+function ivySpeak(text, holdMs){
+  ivySay=text;
+  if(sayTimer){ clearTimeout(sayTimer); sayTimer=null; }
+  if(holdMs) sayTimer=setTimeout(()=>{ sayTimer=null; ivySay=null; render(); }, holdMs);
+  render();
+}
+function hushIvy(){
+  if(sayTimer){ clearTimeout(sayTimer); sayTimer=null; }
+  ivySay=null; advice=null;
+}
+let advice=null;              // {cell, rank, deus} while she is pointing at a square
+/* Which banner the player holds. Red moves first, so choosing white means Ivy
+   opens. Everything that used to assume the player was red now asks. */
+let HUMAN=1;
+const IVY=()=>3-HUMAN;
+/* Once Ivy steps aside both banners are played by people at the same board, so
+   whichever side is to move is the one taking input. Playing someone far away
+   works the other way around: the banner is handed out by the server and this
+   browser only ever takes input for that one. */
+let localPlay=false;
+let netPlay=false, net=null, lobbyOpen=false;
+const mySeat=()=>netPlay?net.seat+1:HUMAN;         // the banner this browser holds
+const seat=()=>localPlay?game.toMove():mySeat();   // the side a person is playing now
+/* A game lost on the clock or given up is over while the board still has squares
+   on it, so the turn is not the only thing that decides whether input is taken. */
+const netDecided=()=>netPlay&&net&&!!net.over;
+const humanTurn=()=>localPlay||(game.toMove()===mySeat()&&!netDecided());
+const sideName=p=>p===1?'Red':'White';
+const oppName=()=>(net&&net.names&&net.names[1-net.seat])||'Them';
+/* What a side is called on the screen. Three arrangements share one board, so
+   the question is asked in one place rather than at every caption. */
+function sideLabel(p){
+  if(localPlay) return sideName(p);
+  if(netPlay) return p===mySeat()?'You':oppName();
+  return p===HUMAN?'You':'Ivy';
+}
+
+/* The squares are built once per board size. A replay steps through a game by
+   rebuilding the position from move one, which happens often, so it reuses
+   these rather than making them again. */
+function buildCells(n){
+  cfg=makeCfg(n);
+  boardEl.style.gridTemplateColumns=`repeat(${n},1fr)`;
+  boardEl.style.gridTemplateRows=`repeat(${n},1fr)`;   // rows as well, or a square shifts under a piece
+  boardEl.innerHTML=''; cells=[]; imgs=[];
+  for(let i=0;i<cfg.cc;i++){
+    const d=document.createElement('div');
+    const r=(i/n)|0, c=i%n;
+    d.className='cell'+(((r+c)&1)?' alt':'');
+    d.style.zIndex=String(r+1);          // nearer rows sit in front of the ones behind
+    const im=document.createElement('img');
+    im.style.display='none'; im.alt='';
+    d.appendChild(im);
+    d.addEventListener('click',()=>onClick(i));
+    d.addEventListener('mouseenter',()=>onHover(i));
+    d.addEventListener('mouseleave',clearPreview);
+    boardEl.appendChild(d); cells.push(d); imgs.push(im);
+  }
+}
+
+function build(n){
+  gen++;
+  stopAuto();
+  hideOutcome();
+  const sel=document.getElementById('banner');
+  HUMAN = sel ? (+sel.value||1) : 1;
+  if(!cfg || cfg.n!==n || !cells.length) buildCells(n);
+  game=new Game(cfg);
+  busy=false; deusMode=false; replay=null; justSwapped=false; setMood('idle');
+  // the rules quote the count for the board in play, so it only moves when the
+  // board does
+  document.getElementById('deadlinen').textContent=game.deadline(); hushIvy();
+  extinctAt=new Map(); logEntries=[]; renderLog();
+  showReplayBar();
+  sizeSprites();
+  render();
+  // A board built behind the lobby is scenery. Nobody is sitting at it yet, so it
+  // is left quiet and no turn is taken on it.
+  if(lobbyOpen){ say(''); return; }
+  if(netPlay){
+    say(mySeat()===1 ? 'You hold the red banner and move first. Place a '+RANKNAME[game.curRank()]+'.'
+                     : 'You hold the white banner. '+oppName()+' opens.');
+    advance(); return;
+  }
+  say(localPlay ? 'Red banner plays the first move.'
+      : HUMAN===1 ? 'You hold the red banner and move first. Place a '+RANKNAME[game.curRank()]+'.'
+                  : 'You hold the white banner. Ivy opens.');
+  if(!localPlay && game.toMove()!==HUMAN) advance();   // white means Ivy moves first
+  else if(localPlay) advance();
+}
+
+/* One multiplier for every sprite on the board. The rank art and the claim art
+   are different sizes in their files, so scaling each to fit its square would
+   draw them at different pixel sizes and put two thicknesses on one board. A
+   single whole number keeps one source pixel the same size everywhere, which
+   leaves a claim small next to a rank, as the art intends. It is floored
+   because a fractional multiple is what makes pixel edges uneven. */
+function sizeSprites(){
+  if(!cells.length) return;
+  const wrap=boardEl.parentElement, n=cfg.n;
+  const inner=(wrap.parentElement?wrap.parentElement.clientWidth:wrap.clientWidth);
+  mult=Math.max(1, Math.floor(((inner/n)*0.78)/SPRITE_BOX.h));
+  const line=2*mult;                              // the art draws its outlines two pixels thick
+  // Squares are capped to the multiplier rather than stretched to the window. A
+  // square running past its sprite leaves a rank marooned, and the art cannot
+  // follow, since the next whole step is twice the size.
+  const cell=Math.round(SPRITE_BOX.h*mult/0.72);
+  wrap.style.setProperty('--line', line+'px');     // the grid inherits this from the frame
+  const full=cell*n + line*(n+1);                 // squares, the rules between them, and the outer frame
+  boardEl.style.width=Math.min(inner-line*4, full)+'px';   // the mat takes two lines a side
+  pinBoard();
+  render();
+}
+
+/* Pins the board column when the layout is side by side and the column is short
+   enough to sit inside the window with room to spare. Measured rather than
+   assumed, because the board grows with the piece count. */
+function pinBoard(){
+  const col=document.querySelector('.boardcol');
+  const wide=window.matchMedia('(min-width:901px)').matches;
+  col.classList.remove('stick');
+  const fits=col.getBoundingClientRect().height + 40 <= window.innerHeight;
+  col.classList.toggle('stick', wide && fits);
+}
+window.addEventListener('resize',()=>{ clearTimeout(sizeSprites._t); sizeSprites._t=setTimeout(sizeSprites,120); });
+
+function doubledCells(){
+  const s=new Set();
+  for(const c of game.doubledSet(1)) s.add(c);
+  for(const c of game.doubledSet(2)) s.add(c);
+  return s;
+}
+
+function render(){
+  const myTurn = humanTurn() && !busy && !game.over() && !replay;
+  const legal = myTurn ? new Set(game.moves()) : null;
+  const dbl = doubledCells();
+  for(let i=0;i<cfg.cc;i++){
+    const c=cells[i], im=imgs[i];
+    const r=(i/cfg.n)|0, col=i%cfg.n;
+    c.className='cell'+((((r+col)&1))?' alt':'');
+    if(game.kind[i]===EMPTY){
+      im.style.display='none';
+    } else if(game.kind[i]===PIECE){
+      const rank=game.shp[i], sp=SPRITE[rank];
+      im.src=pieceSrc(rank,game.own[i]);
+      im.width=sp.w*mult; im.height=sp.h*mult;
+      im.className=''; im.style.display='block';   // squares are reused, so clear the mark
+    } else if(extinctAt.has(i)){
+      im.src=extinctSrc(extinctAt.get(i));      // the faction that lost them
+      im.width=EXTINCT.w*mult; im.height=EXTINCT.h*mult;
+      im.className=''; im.style.display='block';
+    } else {
+      const value=(game.claimCell[i]?LANDVAL:1)*(dbl.has(i)?2:1);
+      const art=CLAIMART[value];
+      im.src=landSrc(game.own[i],value);
+      im.width=art.w*mult; im.height=art.h*mult;
+      im.className='claim'; im.style.display='block';
+    }
+    if(legal && legal.has(i)){ c.classList.add('playable'); if(deusMode) c.classList.add('deusmode'); }
+    if(i===game.last) c.classList.add('lastmv');
+  }
+  // Mark every band short of open ground, for both sides, since it is open
+  // information either way and counting it by eye is the hard part.
+  if(document.getElementById('danger').checked){
+    const S=scratch(cfg.cc), ver=++S.vAud;
+    for(let i=0;i<cfg.cc;i++){
+      if(game.kind[i]!==PIECE || S.aud[i]===ver) continue;
+      const r=game.groupLibs(i,S.grp);
+      for(let q=0;q<r.n;q++) S.aud[S.grp[q]]=ver;
+      if(r.libs<=2){
+        const mark=r.libs===1?'doomed':'shaky';
+        for(let q=0;q<r.n;q++) cells[S.grp[q]].classList.add(mark);
+      }
+    }
+  }
+  document.getElementById('n1').textContent=game.score[0];
+  document.getElementById('n2').textContent=game.score[1];
+  for(const p of [1,2]){
+    const bits=[`${game.left(p)} left`];
+    if(game.deusCell[p-1]>=0) bits.push('Deus afield');
+    else if(game.deusUsed[p-1]) bits.push('Deus extinguished');
+    else if(!game.canDeus(p)) bits.push('Deus stayed home');
+    document.getElementById('c'+p).textContent=bits.join(', ');
+  }
+  document.getElementById('l1').textContent = sideLabel(1);
+  document.getElementById('l2').textContent = sideLabel(2);
+  document.getElementById('sc1').classList.toggle('act',game.toMove()===1&&!game.over());
+  document.getElementById('sc2').classList.toggle('act',game.toMove()===2&&!game.over());
+  document.getElementById('askSwap').disabled = busy || !!replay || game.over();
+  // the ring lives in the frame and moves into whichever square she points at,
+  // so rebuilding the squares never loses it
+  const ring=document.getElementById('advicering');
+  if(advice){
+    cells[advice.cell].appendChild(ring);
+    ring.hidden=false;
+    document.getElementById('deusbtn').classList.toggle('advice', !!advice.deus);
+  } else {
+    ring.hidden=true;
+    document.getElementById('deusbtn').classList.remove('advice');
+  }
+  const db=document.getElementById('deusbtn');
+  db.disabled=!(myTurn&&game.canDeus(seat()));
+  db.classList.toggle('on',deusMode);
+  const window_ = game.left(seat())-game.deadline();   // pieces left before the deadline
+  db.textContent = !game.hasDeus(seat())
+      ? (game.deusCell[seat()-1]>=0?'Deus is afield':'Deus was extinguished')
+      : window_<=0 ? 'Deus stayed home'
+      : deusMode ? 'Choose their square, or cancel'
+      : `Play Deus  (${window_} turn${window_===1?'':'s'} left to send them)`;
+  const face = game.over() ? 'Gameover' : ivyMood==='owch' ? 'Owch' : busy ? 'Thinking' : 'Idle';
+  document.getElementById('ivyart').src = ART+'Ivy_'+face+'.png';
+  /* She keeps quiet about thinking on the folded layout, where she is large and
+     would announce it every single turn. Anything she is asked still shows. */
+  const zoomed = window.matchMedia('(max-width:900px)').matches;
+  document.getElementById('ivymood').textContent = ivySay !== null ? ivySay :
+    face==='Gameover' ? 'Well played!!' : face==='Owch' ? 'owch' :
+    (face==='Thinking' && !zoomed) ? 'Thinking' : '';
+  // the rank going down this turn, or Deus while the player is choosing a square for them
+  const sendingDeus = deusMode && game.canDeus(seat()) && humanTurn();
+  const label=document.getElementById('turnrank');
+  label.textContent = sendingDeus ? RANKNAME[DEUS] : RANKNAME[game.curRank()];
+  label.classList.toggle('deus', sendingDeus);
+  drawCycle();
+}
+
+function drawCycle(){
+  const el=document.getElementById('cycle'); el.innerHTML='';
+  for(let t=0;t<4;t++){
+    const ply=game.ply+t, rank=ply%NRANK, who=1+(ply&1);
+    const d=document.createElement('div');
+    d.className='cyc'+(t===0?' now':'');
+    const name = localPlay ? (who===1?'red':'white')
+               : netPlay ? (who===mySeat()?'you':oppName())
+               : (who===HUMAN?'you':'Ivy');
+    d.innerHTML=iconTag(rank,who,1)+`<div class="who">${t===0?'now':name}</div>`;
+    el.appendChild(d);
+  }
+}
+
+/* The toggle governs whether the land a piece would claim is shown. What a
+   piece would extinguish is always shown, since that is a consequence of the
+   move rather than a reading of the position. */
+function onHover(i){
+  if(busy||replay||game.over()||!humanTurn()) return;
+  if(game.kind[i]!==EMPTY||!game.legal(i)) return;
+  const {claimed,killed}=game.peek(i,deusMode&&game.canDeus(seat()));
+  if(document.getElementById('preview').checked)
+    for(const j of claimed) cells[j].classList.add('take');
+  for(const j of killed) cells[j].classList.add('die');
+}
+function clearPreview(){ for(const c of cells) c.classList.remove('take','die'); }
+function say(t){ msgEl.textContent=t; }
+
+/* The chronicle is kept on the UI side rather than inside Game. The search
+   clones a position thousands of times a move, and a history array would be
+   copied on every one of those clones for no gain. */
+let logEntries=[], logShut=false;
+function coord(i){
+  const n=cfg.n, r=(i/n)|0, c=i%n;
+  return String.fromCharCode(97+c)+(n-r);
+}
+function logMove(who,cell,deus,rank,r){
+  logEntries.push({no:logEntries.length+1, who, cell, deus, rank,
+                   claimed:r?r.claimed.length:0, killed:r?r.killed.length:0,
+                   deusLost:r?r.deusLost:0});
+  if(r&&r.extinct) for(const x of r.extinct) extinctAt.set(x.c, x.side);
+  renderLog();
+}
+function renderLog(){
+  const el=document.getElementById('log');
+  if(!logEntries.length){ el.innerHTML='<div class="logempty">No moves yet.</div>'; return; }
+  const cur=replay?replay.at:-1;
+  el.innerHTML=logEntries.map(e=>{
+    const side=e.who===1?'p1':'p2';
+    const here=e.no===cur?' atnow':'';
+    if(e.cell<0)
+      return `<div class="lg${here}"><span class="ln">${e.no}</span><span class="sq ${side}">-</span><span class="ev">passes</span></div>`;
+    const ev=[];
+    if(e.deus) ev.push('Deus takes the field');
+    if(e.claimed) ev.push(`claims <b>${e.claimed}</b>`);
+    if(e.killed) ev.push(`extinguishes <b>${e.killed}</b>`);
+    if(e.deusLost) ev.push('<b>a Deus is extinguished</b>');
+    return `<div class="lg${e.deus?' deusrow':''}${here}"><span class="ln">${e.no}</span>`+
+           iconTag(e.deus?DEUS:e.rank, e.who, 1)+
+           `<span class="sq ${side}">${coord(e.cell)}</span>`+
+           `<span class="ev">${ev.join(', ')}</span></div>`;
+  }).join('');
+  /* The chronicle scrolls itself. scrollIntoView would drag the whole page along
+     with it, which threw the board around on every step of an autoplay. */
+  const at=el.querySelector('.atnow');
+  if(at) el.scrollTop = at.offsetTop - (el.clientHeight - at.offsetHeight)/2;
+  else el.scrollTop = el.scrollHeight;
+}
+
+/* The subject is named once and the verbs agree with it, so Red and White read
+   the same way Ivy does. What was extinguished is stated on its own, since it
+   happened to the other side rather than being something the mover did. */
+function describe(who,r,deus){
+  const v=b=>b+(who==='You'?'':'s');
+  const acts=[];
+  if(deus) acts.push(v('send')+' Deus out');
+  if(r.claimed.length) acts.push(v('claim')+` ${r.claimed.length} square${r.claimed.length>1?'s':''}`);
+  const parts=[];
+  if(acts.length) parts.push(`${who} ${acts.join(', ')}`);
+  if(r.killed.length) parts.push(`${r.killed.length} piece${r.killed.length>1?'s':''} extinguished`);
+  if(r.deusLost) parts.push('a Deus is extinguished');
+  return parts.length?parts.join(', ')+'.':'';
+}
+
+function onClick(i){
+  if(busy||replay||game.over()||!humanTurn()) return;
+  const mover=seat();
+  if(!game.canPlay(mover)||game.kind[i]!==EMPTY||!game.legal(i)) return;
+  hushIvy();                       // her advice is spent once you play
+  const asDeus=deusMode&&game.canDeus(mover), rank=game.curRank();
+  const mineBefore=game.score[mover-1];
+  const r=game.play(i,asDeus);
+  logMove(mover,i,asDeus,rank,r);
+  if(!localPlay){
+    const swing=game.score[mover-1]-mineBefore;
+    const tookHerDeus=r.extinct.some(x=>x.side===IVY());
+    if(swing>=SWING || tookHerDeus) setMood('owch', 2600);
+  }
+  deusMode=false; clearPreview();
+  say(describe(localPlay?sideName(mover):'You', r, asDeus));
+  // The board moves the moment it is pressed and the server is told afterwards,
+  // so a square never waits on a round trip. Nothing can be lost by going first:
+  // every way the send can fail ends the game rather than needing the move back.
+  if(netPlay) netPush(i, asDeus);
+  advance();
+}
+
+function advance(){
+  render();
+  if(finish()) return;
+  if(netPlay){
+    const mover=mySeat();
+    if(netDecided()){ busy=false; render(); return; }            // the clock or a resignation settled it
+    if(game.toMove()!==mover){ busy=false; render(); return; }   // their turn, so wait
+    /* A pass goes through the server like anything else. Leaving it out would put
+       the two sides on different turn counts, and the server counts turns. */
+    if(!game.canPlay(mover)||!game.moves().length){
+      const rank=game.curRank(), r=game.play(-1);
+      logMove(mover,-1,false,rank,r);
+      say(!game.canPlay(mover)?'Your pieces are spent. You pass.':'No square is open to you. You pass.');
+      netPush(-1,false);
+      advance(); return;
+    }
+    if(game.canDeus(mover) && game.left(mover)===game.deadline()+1 && !deusMode){
+      deusMode=true;
+      say('Last turn to send Deus out. Pick a square, or press the button to hold back.');
+    }
+    busy=false; render(); return;
+  }
+  if(humanTurn()){
+    const mover=seat(), who=localPlay?sideName(mover):'You';
+    if(!game.canPlay(mover)){ game.play(-1); logMove(mover,-1);
+      say(localPlay?`${who} is spent and passes.`:'Your pieces are spent. You pass.'); advance(); return; }
+    if(!game.moves().length){ game.play(-1); logMove(mover,-1);
+      say(localPlay?`No square is open to ${who}. Passing.`:'No square is open to you. You pass.'); advance(); return; }
+    /* On the last turn the deadline allows, Deus is armed for whoever is sitting
+       there. Missing the window loses the piece outright, and the button stays a
+       toggle, so this is a default rather than a decision taken from anyone. */
+    if(game.canDeus(mover) && game.left(mover)===game.deadline()+1 && !deusMode){
+      deusMode=true;
+      say(`Last turn to send Deus out${localPlay?', '+who.toLowerCase():''}. Pick a square, or press the button to hold back.`);
+    }
+    busy=false; render(); return;
+  }
+  busy=true; render();
+  const myGen=gen;
+  setTimeout(()=>{
+    if(myGen!==gen) return;                 // the board moved on while she was thinking
+    const her=IVY();
+    if(!game.canPlay(her)||!game.moves().length){ game.play(-1); logMove(her,-1); say('Ivy passes.'); advance(); return; }
+    /* Ivy's three tiers are values 0, 1 and 2 and are what the game opens on.
+       Anything else is a trained network from sim/league, added as an extra
+       opponent; if one fails to load the game falls back to Sharp rather than
+       stalling on a turn. */
+    const d=document.getElementById('diff').value;
+    const act = d==='0'?pickGentle(game) : d==='1'?pickSteady(game) : d==='2'?pickSharp(game)
+              : (window.pickNeural?window.pickNeural(game,d.slice(4)):pickSharp(game));
+    let cell=act, deus=false;
+    if(act && typeof act==='object'){ cell=act.cell; deus=!!act.deus; }
+    const rank=game.curRank();
+    const r=game.play(cell,deus);
+    logMove(her,cell,deus,rank,r);
+    const line = cell<0 ? 'Ivy passes.' : describe('Ivy',r,deus);
+    say(justSwapped ? ('Ivy spends the turn you handed her. '+line).trim() : line);
+    justSwapped=false;
+    advance();
+  },180);
+}
+
+function finish(){
+  if(!game.over()) return false;
+  if(netPlay){
+    const mine=game.score[mySeat()-1], theirs=game.score[2-mySeat()];
+    render();
+    say(mine>theirs?`You hold the greater land, ${mine} to ${theirs}.`
+        :theirs>mine?`${oppName()} holds the greater land, ${theirs} to ${mine}.`
+                    :`Even holdings, ${mine} apiece.`);
+    if(!replay) showOutcome(mine,theirs);
+    netQuiet();                     // the board is decided, so stop asking the server
+    return true;
+  }
+  if(localPlay){
+    const red=game.score[0], white=game.score[1];
+    render();
+    say(red>white?`Red holds the greater land, ${red} to ${white}.`
+        :white>red?`White holds the greater land, ${white} to ${red}.`
+                  :`Even holdings, ${red} apiece.`);
+    if(!replay) showOutcome(red,white);
+    return true;
+  }
+  const mine=game.score[HUMAN-1], hers=game.score[IVY()-1];
+  render();
+  if(replay){
+    // a replay has no plaque, so the line carries the result instead
+    say(mine>hers?`You hold the greater land, ${mine} to ${hers}.`
+        :hers>mine?`Ivy holds the greater land, ${hers} to ${mine}.`
+                  :`Even holdings, ${mine} apiece.`);
+  } else {
+    say('');                            // the plaque says it, so the line stays quiet
+    showOutcome(mine,hers);
+  }
+  return true;
+}
+
+/* ---- carrying a game out and back in --------------------------------------
+   A chronicle holds the board it was played on and the moves in order, which is
+   all a replay needs: the position is rebuilt by replaying from the first move
+   rather than stored, so a file stays small and cannot disagree with the rules. */
+const CHRONICLE_VERSION = 1;
+
+function exportChronicle(){
+  if(!logEntries.length){ say('There is nothing to export yet.'); return; }
+  const data={
+    game:'Choral', version:CHRONICLE_VERSION,
+    board:cfg.n, budget:game.budget, played:new Date().toISOString(),
+    moves:logEntries.map(e=>({c:e.cell, d:e.deus?1:0}))
+  };
+  const name=`choral-${cfg.n}x${cfg.n}-${data.played.slice(0,19).replace(/[:T]/g,'-')}.json`;
+  const url=URL.createObjectURL(new Blob([JSON.stringify(data)],{type:'application/json'}));
+  const a=document.createElement('a');
+  a.href=url; a.download=name; document.body.appendChild(a); a.click();
+  a.remove(); URL.revokeObjectURL(url);
+  say(`Chronicle saved as ${name}.`);
+}
+
+function importChronicle(text){
+  let data;
+  try{ data=JSON.parse(text); }
+  catch(err){ say('That file is not a chronicle.'); return; }
+  if(!data || !Array.isArray(data.moves) || !data.board){ say('That file is not a chronicle.'); return; }
+  const n=+data.board;
+  if(![7,9,11].includes(n)){ say('That chronicle uses a board this game does not have.'); return; }
+  gen++;                                    // stand down any turn still in flight
+  stopAuto(); hideOutcome();
+  document.getElementById('size').value=String(n);
+  buildCells(n);
+  replay={moves:data.moves.map(m=>({c:+m.c, d:!!m.d})), at:0, budget:+data.budget||0};
+  seekReplay(0);
+  sizeSprites();
+  say(`Chronicle loaded. ${replay.moves.length} moves. Step through with the arrows.`);
+}
+
+/* Rebuilding from move one each step keeps a single source of truth. A game is
+   at most a hundred moves and a move costs microseconds, so the whole position
+   is cheaper to replay than to store and unwind. */
+function seekReplay(at){
+  if(!replay) return;
+  at=Math.max(0, Math.min(replay.moves.length, at));
+  game=new Game(cfg, replay.budget||0);
+  extinctAt=new Map(); logEntries=[];
+  for(let k=0;k<at;k++){
+    const m=replay.moves[k];
+    const who=game.toMove(), rank=game.curRank();
+    const r=game.play(m.c, m.d);
+    logEntries.push({no:k+1, who, cell:m.c, deus:m.d, rank,
+                     claimed:r.claimed.length, killed:r.killed.length, deusLost:r.deusLost});
+    for(const x of r.extinct) extinctAt.set(x.c, x.side);
+  }
+  replay.at=at;
+  busy=false; deusMode=false;
+  renderLog(); showReplayBar(); render();
+  const a=game.score[0], b=game.score[1];
+  if(at===0) say('The board before the first move.');
+  else if(at===replay.moves.length) say(`End of the chronicle. ${a} to ${b}.`);
+  else say(`Move ${at} of ${replay.moves.length}. ${a} to ${b}.`);
+}
+
+function showReplayBar(){
+  const bar=document.getElementById('replaybar');
+  bar.hidden=!replay;
+  if(replay) document.getElementById('rwPos').textContent=`${replay.at} of ${replay.moves.length}`;
+  const btn=document.getElementById('rwAuto');
+  btn.textContent = autoTimer ? 'Pause' : 'Play';
+  btn.classList.toggle('on', !!autoTimer);
+}
+
+/* Autoplay runs the replay forward on a timer and stops of its own accord at
+   the last move. Any manual step halts it first, so the two never fight over
+   the position. */
+const AUTO_MS = 550;
+let autoTimer=null;
+function stopAuto(){
+  if(autoTimer){ clearInterval(autoTimer); autoTimer=null; }
+  if(replay) showReplayBar();
+}
+function startAuto(){
+  if(!replay || autoTimer) return;
+  if(replay.at>=replay.moves.length) seekReplay(0);
+  autoTimer=setInterval(()=>{
+    if(!replay || replay.at>=replay.moves.length){ stopAuto(); return; }
+    seekReplay(replay.at+1);
+    if(replay.at>=replay.moves.length) stopAuto();
+  }, AUTO_MS);
+  showReplayBar();
+}
+function step(to){ stopAuto(); seekReplay(to); }
+
+/* The board dims and the outcome stands over it once the last piece is spent. */
+/* A banner may be handed in, since a game lost on the clock or given up is
+   decided by something the holdings do not show. */
+function showOutcome(mine,hers,forced){
+  document.getElementById('overbanner').textContent = forced ? forced : localPlay
+    ? (mine>hers ? 'Red wins!' : hers>mine ? 'White wins!' : 'Even holdings')
+    : netPlay
+    ? (mine>hers ? 'You win!' : hers>mine ? oppName()+' wins' : 'Even holdings')
+    : (mine>hers ? 'You win!' : hers>mine ? 'Ivy Wins' : 'Even holdings');
+  const seatColor=p=>p===1?'red':'white';
+  const you=localPlay?'red':seatColor(netPlay?mySeat():HUMAN);
+  const her=localPlay?'white':seatColor(netPlay?3-mySeat():3-HUMAN);
+  document.getElementById('overscore').innerHTML =
+    `<div class="${you}"><b>${mine}</b> <span>${localPlay?'red':'you'}</span></div>`+
+    `<div class="${her}"><b>${hers}</b> <span>${localPlay?'white':netPlay?oppName():'Ivy'}</span></div>`;
+  // A rematch needs a new pairing, so the button leads back to the lobby instead.
+  document.getElementById('rematch').textContent = netPlay ? 'Back to the lobby' : 'Rematch';
+  /* Beating her on either of the gentler settings gets an offer to step up. On
+     the hardest one there is nothing left to offer, so she stays quiet. */
+  const step=+document.getElementById('diff').value;
+  const offer = !localPlay && !netPlay && mine>hers && step<2;
+  const ask=document.getElementById('overask'), harder=document.getElementById('harder');
+  ask.textContent = offer
+    ? (step===0 ? 'Ivy was going easy on you! Do you want to try again a bit harder?'
+                : 'Ivy was still going a bit easy on you, do you want to try again a bit harder?')
+    : '';
+  ask.hidden=!offer; harder.hidden=!offer;
+  document.getElementById('over').hidden=false;
+  boardEl.classList.add('done');
+}
+function hideOutcome(){
+  document.getElementById('overask').hidden=true;
+  document.getElementById('harder').hidden=true;
+  document.getElementById('over').hidden=true;
+  boardEl.classList.remove('done');
+}
+
+document.getElementById('deusbtn').addEventListener('click',()=>{ deusMode=!deusMode; clearPreview(); render(); });
+document.getElementById('loghead').addEventListener('click',()=>{
+  logShut=!logShut;
+  document.getElementById('log').classList.toggle('shut',logShut);
+  document.getElementById('caret').classList.toggle('shut',logShut);
+  if(!logShut) renderLog();
+});
+/* Trading banners keeps the position and hands each side to the other player.
+   Ivy takes over the pieces you were holding, so if the turn now falls to her
+   she plays it. */
+/* Rebuild the live game from a list of moves. Undo leans on this rather than
+   unwinding a position by hand, so there is one way a board is ever built. */
+function rebuildFrom(entries){
+  const tape=entries.map(e=>({c:e.cell, d:!!e.deus}));
+  game=new Game(cfg);
+  extinctAt=new Map(); logEntries=[];
+  for(let k=0;k<tape.length;k++){
+    const who=game.toMove(), rank=game.curRank();
+    const r=game.play(tape[k].c, tape[k].d);
+    logEntries.push({no:k+1, who, cell:tape[k].c, deus:tape[k].d, rank,
+                     claimed:r.claimed.length, killed:r.killed.length, deusLost:r.deusLost});
+    for(const x of r.extinct) extinctAt.set(x.c, x.side);
+  }
+  renderLog();
+}
+
+/* Step back to the last point where the turn was yours, which takes your move
+   and her reply together. */
+function undoMove(){
+  if(busy || replay || !logEntries.length) return false;
+  let n=logEntries.length;
+  while(n>0){ n--; if((1+(n&1))===HUMAN) break; }
+  if(n===logEntries.length) return false;
+  gen++; stopAuto(); hideOutcome(); hushIvy();
+  rebuildFrom(logEntries.slice(0,n));
+  busy=false; deusMode=false;
+  render();
+  return true;
+}
+
+function swapSides(){
+  if(busy || replay || game.over()) return;
+  HUMAN = 3-HUMAN;
+  document.getElementById('banner').value = String(HUMAN);
+  setMood('idle');
+  // The turn belongs to the side you just handed over, so Ivy spends it. Saying
+  // so keeps her next move from reading as two turns in a row.
+  justSwapped = game.toMove()!==HUMAN;
+  say(HUMAN===1 ? 'You take the red banner.' : 'You take the white banner.');
+  advance();
+}
+let justSwapped=false;
+/* She says goodbye, waits a beat, then fades out along with everything that was
+   hers to offer. The board is cleared behind her, since the position she was
+   halfway through is hers rather than something two new players should inherit. */
+function playNearby(){
+  if(localPlay||netPlay||net) return;
+  gen++;                                  // stand down any turn she was mid way through
+  busy=false; hushIvy();
+  document.getElementById('askmenu').open=false;
+  ivySpeak('Of course. I will leave you two to it.', 2200);
+  setTimeout(()=>{
+    localPlay=true;
+    document.body.classList.add('solo');
+    setTimeout(()=>{
+      document.body.classList.add('sologone');
+      newGame();                       // a clean board for the two of you
+    }, 900);
+  }, 1100);
+}
+/* ---- playing someone far away ----------------------------------------------
+   The server pairs players, holds the two clocks and decides whose turn it is.
+   It does not know the rules, and it was built that way on purpose: the whole
+   engine already runs in both browsers, and putting a second copy on the server
+   would mean two rule sets to keep in step.
+
+   What that leaves is one gap worth naming. A player running an edited copy of
+   this page could send a square the rules do not allow, and the server would
+   pass it along without noticing. So every move that arrives is put through
+   legal() here before it is played. A move that does not stand ends the game.
+   There is no way back from it: the two boards have already stopped agreeing,
+   and carrying on would only be showing one player a position the other one is
+   not looking at. */
+
+// Where the server lives. Local pages talk to a local server so the game can be
+// tested without deploying anything. Put the deployed address here once it has
+// one, and see server/DEPLOY.md.
+const SERVER = /^(localhost|127\.0\.0\.1|\[::1\]|)$/.test(location.hostname)
+  ? 'http://127.0.0.1:8790'
+  : 'https://choral-server.example.run.app';
+
+const NET_NAME_OK=/^[A-Za-z0-9 _-]{1,16}$/, NET_CODE_OK=/^[A-Z0-9]{8}$/;
+let netPollGen=0, netClockTimer=null;
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+
+async function netCall(method, path, body){
+  const stop=new AbortController();
+  // A waiting request is held for twenty five seconds, so the ceiling has to sit
+  // well above that or every quiet moment would read as a dropped connection.
+  const bell=setTimeout(()=>stop.abort(), 40000);
+  try{
+    const res=await fetch(SERVER+path, {
+      method,
+      headers: body?{'Content-Type':'application/json'}:undefined,
+      body: body?JSON.stringify(body):undefined,
+      signal: stop.signal,
+    });
+    let out={};
+    try{ out=await res.json(); }catch(e){}
+    return {status:res.status, body:out};
+  } finally { clearTimeout(bell); }
+}
+
+/* ---- the lobby ---- */
+function showLobby(view, flag){
+  lobbyOpen=true;
+  document.getElementById('lobby').hidden=false;
+  document.getElementById('lobbymenu').hidden = view!=='menu';
+  document.getElementById('lobbywait').hidden = view!=='wait';
+  const f=document.getElementById('lobbyflag');
+  if(flag!==undefined){ f.textContent=flag||''; f.hidden=!flag; }
+}
+function hideLobby(){
+  lobbyOpen=false;
+  document.getElementById('lobby').hidden=true;
+  document.getElementById('lobbyflag').hidden=true;
+}
+function setWait(kind, code){
+  const line=document.getElementById('waitline'), cd=document.getElementById('waitcode');
+  document.getElementById('waithead').textContent =
+    kind==='host'?'Your private game':kind==='join'?'Joining':'Seeking a game';
+  line.textContent = kind==='join'?'Sitting down':'Waiting for an opponent';
+  cd.textContent = code||''; cd.hidden = kind!=='host'||!code;
+  document.getElementById('waitnote').textContent =
+    kind==='host' ? 'Give your friend this code. It is held for five minutes.'
+    : kind==='join' ? ''
+    : 'You will be paired with the next person waiting on this board size.';
+}
+// The board behind the lobby is scenery, so it is built without anyone sitting
+// at it. lobbyOpen is what tells build to leave it alone.
+function netScenery(){
+  lobbyOpen=true;
+  build(+document.getElementById('netboard').value);
+}
+/* While a game is on, the settings that would rebuild the board are held shut.
+   Changing the board size under a game the other player is still looking at is
+   the one thing that would desync it without anybody cheating. */
+function lockSettings(on){
+  for(const id of ['new','size','banner'])
+    document.getElementById(id).disabled=on;
+}
+
+/* ---- leaving ---- */
+function netQuiet(){                 // stop talking to the server, keep the game on screen
+  netPollGen++;
+  if(netClockTimer){ clearInterval(netClockTimer); netClockTimer=null; }
+  document.getElementById('netresign').disabled=true;
+}
+function netDrop(){                  // give the seat back, so the lobby has room again
+  if(!net) return;
+  const token=net.token;
+  try{
+    fetch(SERVER+'/api/cancel', {method:'POST', headers:{'Content-Type':'application/json'},
+                                 body:JSON.stringify({token}), keepalive:true});
+  }catch(e){}
+}
+function netEnd(){
+  netQuiet(); netDrop();
+  netPlay=false; net=null;
+  document.getElementById('netpanel').hidden=true;
+  lockSettings(false);
+}
+/* A move that does not stand. The banner names what was played and who played
+   it, since the difference between an opponent doing this and a bug in here
+   matters to whoever reads it. */
+function netFoul(what){
+  const said=`${what} The game has been stopped, because the two boards are no
+              longer looking at the same position.`.replace(/\s+/g,' ');
+  netEnd();
+  netScenery();
+  showLobby('menu', said);
+}
+function netLost(what){
+  netEnd(); netScenery(); showLobby('menu', what);
+}
+
+/* ---- the clocks ---- */
+const mmss=s=>{ s=Math.max(0,Math.ceil(s)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
+function netClockDraw(){
+  if(!net) return;
+  const held=net.clock.slice();
+  // The server sends what was left when it answered. Between answers the running
+  // clock is counted down here, so the number moves rather than stepping.
+  if(net.started && !net.over && !game.over()){
+    const spent=(Date.now()-net.clockAt)/1000;
+    held[net.turn]=Math.max(0, held[net.turn]-spent);
+  }
+  const pair=[[held[net.seat],'A'],[held[1-net.seat],'B']];
+  for(const [secs,tag] of pair){
+    document.getElementById('t'+tag).textContent=mmss(secs);
+    document.getElementById('clk'+tag).classList.toggle('low', secs<=30);
+  }
+  document.getElementById('clkA').classList.toggle('act', net.started&&!net.over&&net.turn===net.seat);
+  document.getElementById('clkB').classList.toggle('act', net.started&&!net.over&&net.turn!==net.seat);
+  document.getElementById('lA').textContent='You';
+  document.getElementById('lB').textContent=oppName();
+}
+
+/* ---- moves in ---- */
+/* Why a move cannot be played, or null if it can. The wording is what the banner
+   shows, so it reads as a sentence about the other player. */
+function netWhyNot(mover, cell, deus){
+  if(game.toMove()!==mover) return 'out of turn';
+  if(cell<0)
+    return (!game.canPlay(mover)||!game.moves().length) ? null : 'a pass with squares still open to them';
+  if(!Number.isInteger(cell)||cell>=cfg.cc) return 'a square that is not on the board';
+  if(!game.canPlay(mover)) return 'a piece they had already spent';
+  if(game.kind[cell]!==EMPTY) return 'a square that was not empty';
+  if(deus&&!game.canDeus(mover)) return 'a Deus they were no longer allowed to send out';
+  if(!game.legal(cell)) return 'a square the rules do not allow';
+  return null;
+}
+function netApply(st){
+  const tape=st.moves||[];
+  // Everything already on this board has to match, or something was rewritten
+  // behind us and the count of moves alone would not show it.
+  const shared=Math.min(tape.length, logEntries.length);
+  for(let k=0;k<shared;k++){
+    const e=logEntries[k];
+    if(tape[k].c!==e.cell || !!tape[k].d!==!!e.deus)
+      return netFoul(`Move ${k+1} came back different from the one that was played.`);
+  }
+  for(let k=logEntries.length;k<tape.length;k++){
+    const mv=tape[k], mover=game.toMove(), deus=!!mv.d, cell=mv.c;
+    const why=netWhyNot(mover, cell, deus);
+    if(why){
+      const who=mover===mySeat()?'Your move was':`${oppName()} played`;
+      return netFoul(`${who} ${why}.`);
+    }
+    const rank=game.curRank(), r=game.play(cell, deus);
+    logMove(mover, cell, deus, rank, r);
+    if(mover!==mySeat())
+      say(cell<0 ? `${oppName()} passes.` : describe(oppName(), r, deus));
+  }
+  advance();
+}
+/* The server owns the verdict when a game ends on the clock or is given up,
+   because neither of those is written on the board. */
+function netVerdict(o){
+  net.over=o;
+  netQuiet();
+  render();                        // squares stop reading as playable straight away
+  const won=o.winner===net.seat;
+  say(o.why==='time' ? (won?`${oppName()} ran out of time.`:'You ran out of time.')
+                     : (won?`${oppName()} resigned.`:'You resigned.'));
+  showOutcome(game.score[mySeat()-1], game.score[2-mySeat()], won?'You win!':oppName()+' wins');
+}
+function netTake(st){
+  if(!net || st.version<net.version) return;      // an older answer overtook a newer one
+  net.version=st.version; net.names=st.names;
+  net.clock=st.clock; net.clockAt=Date.now(); net.turn=st.turn;
+  if(!net.started && st.started) netBegin(st);
+  else if(net.started) netApply(st);
+  if(st.over && !net.over && net.started) netVerdict(st.over);
+  netClockDraw();
+}
+function netBegin(st){
+  net.started=true; net.names=st.names;
+  netPlay=true; hideLobby();
+  document.getElementById('netpanel').hidden=false;
+  document.getElementById('netnote').textContent =
+    `${oppName()} holds the ${net.seat===0?'white':'red'} banner. Placing a piece returns two seconds.`;
+  document.getElementById('netresign').disabled=false;
+  document.getElementById('size').value=String(net.board);
+  lockSettings(true);
+  build(net.board);                 // a clean board, with the seat the server gave out
+  netClockDraw();
+}
+
+/* ---- moves out ---- */
+/* The move is already on this board. A send that cannot be made good ends the
+   game rather than being taken back, since the other player may have seen it. */
+async function netPush(cell, deus){
+  for(let go=0; go<3; go++){
+    let r=null;
+    try{ r=await netCall('POST','/api/move',{token:net.token, cell, deus:!!deus}); }catch(e){}
+    if(!net || !netPlay) return;
+    if(r && r.status===200){ netTake(r.body); return; }
+    if(r && r.status===429){ await wait(900); continue; }
+    if(r && r.status>=400 && r.status<500)
+      return netFoul(`The server would not take that move: ${r.body.error||'no reason given'}.`);
+    await wait(600*(go+1));
+  }
+  netLost('That move could not be sent. The connection to the server was lost.');
+}
+
+/* ---- waiting on the other player ---- */
+/* One request is left open until something changes or twenty five seconds pass,
+   which is the whole of the traffic between moves. A handful of failures in a
+   row is a dropped connection rather than a blip, so it gives up and says so. */
+async function netWatch(){
+  const mine=++netPollGen;
+  let misses=0;
+  while(net && mine===netPollGen){
+    let r=null;
+    try{ r=await netCall('GET','/api/state?token='+encodeURIComponent(net.token)+'&since='+net.version); }
+    catch(e){}
+    if(!net || mine!==netPollGen) return;
+    if(!r){ if(++misses>=4) return netLost('The connection to the server was lost.');
+            await wait(900*misses); continue; }
+    misses=0;
+    if(r.status===429){ await wait(1500); continue; }
+    if(r.status!==200) return netLost(r.body.error?upper(r.body.error)+'.':'The server let the game go.');
+    netTake(r.body);
+  }
+}
+
+const upper=s=>s.charAt(0).toUpperCase()+s.slice(1);
+
+async function netOpen(kind){
+  const name=document.getElementById('netname').value.trim();
+  if(!NET_NAME_OK.test(name))
+    return showLobby('menu','A name is one to sixteen letters, digits, spaces, dashes or underscores.');
+  const board=+document.getElementById('netboard').value;
+  const body={name, board};
+  let path = kind==='host'?'/api/host' : kind==='join'?'/api/join' : '/api/seek';
+  if(kind==='join'){
+    const code=document.getElementById('netcode').value.trim().toUpperCase();
+    if(!NET_CODE_OK.test(code)) return showLobby('menu','A code is eight letters or digits.');
+    body.code=code;
+  }
+  showLobby('wait', ''); setWait(kind, null);
+  let r=null;
+  try{ r=await netCall('POST', path, body); }catch(e){}
+  if(!r) return showLobby('menu','The server could not be reached. It may not be running.');
+  if(r.status===503 && r.body.full)
+    return showLobby('menu','The lobbies are full for now. Please try again in a few minutes.');
+  if(r.status!==200)
+    return showLobby('menu', r.body.error?upper(r.body.error)+'.':'The server turned that down.');
+  const st=r.body.state;
+  net={ token:r.body.token, code:r.body.code, seat:r.body.seat, board,
+        names:st.names, clock:st.clock, clockAt:Date.now(), turn:st.turn,
+        version:st.version, started:false, over:null };
+  netClockTimer=setInterval(netClockDraw, 250);
+  if(st.started) netBegin(st); else setWait(kind, r.body.code);
+  netWatch();
+}
+
+/* She says goodbye the same way she does for a game nearby, then the lobby comes
+   up over an empty board. */
+function playFarAway(){
+  if(localPlay||netPlay||net) return;
+  gen++; busy=false; hushIvy();
+  document.getElementById('askmenu').open=false;
+  ivySpeak('Of course. Let me find you someone.', 2200);
+  setTimeout(()=>{
+    document.body.classList.add('solo');
+    setTimeout(()=>{
+      document.body.classList.add('sologone');
+      netScenery();
+      showLobby('menu','');
+    }, 900);
+  }, 1100);
+}
+
+document.getElementById('netseek').addEventListener('click',()=>netOpen('seek'));
+document.getElementById('nethost').addEventListener('click',()=>netOpen('host'));
+document.getElementById('netjoin').addEventListener('click',()=>netOpen('join'));
+document.getElementById('netcancel').addEventListener('click',()=>{ netEnd(); showLobby('menu',''); });
+document.getElementById('netresign').addEventListener('click',async()=>{
+  if(!net||!netPlay||net.over||game.over()) return;
+  document.getElementById('netresign').disabled=true;
+  try{ const r=await netCall('POST','/api/resign',{token:net.token}); if(r.status===200) netTake(r.body); }
+  catch(e){ netLost('The connection to the server was lost.'); }
+});
+document.getElementById('netleave').addEventListener('click',async()=>{
+  // Walking out of a live game is a resignation, since the other player is sitting
+  // there and their clock is not the one running.
+  if(net&&netPlay&&!net.over&&!game.over()){
+    try{ await netCall('POST','/api/resign',{token:net.token}); }catch(e){}
+  }
+  netEnd(); netScenery(); showLobby('menu','');
+});
+document.getElementById('netback').addEventListener('click',()=>{
+  netEnd(); hideLobby();
+  document.body.classList.remove('sologone');
+  /* A beat between putting her back and letting her show, so she fades in rather
+     than appearing. It is a timer and not a frame: a tab sitting in the
+     background is given no frames, and she would never come back at all. */
+  setTimeout(()=>document.body.classList.remove('solo'), 30);
+  newGame();
+});
+// A closed tab should hand its seat back rather than holding one of the ten
+// until the room is swept.
+window.addEventListener('pagehide',()=>{ if(net) netDrop(); });
+
+const newGame=()=>{
+  // In a net game the button under the outcome leads back to the lobby, since a
+  // fresh board needs a fresh pairing.
+  if(netPlay){ netEnd(); netScenery(); showLobby('menu',''); return; }
+  build(+document.getElementById('size').value);
+};
+document.getElementById('new').addEventListener('click',newGame);
+document.getElementById('size').addEventListener('change',newGame);
+document.getElementById('banner').addEventListener('change',newGame);
+document.getElementById('rematch').addEventListener('click',newGame);
+document.getElementById('askNear').addEventListener('click',playNearby);
+document.getElementById('askFar').addEventListener('click',playFarAway);
+document.getElementById('harder').addEventListener('click',()=>{
+  const sel=document.getElementById('diff');
+  sel.value=String(Math.min(2, +sel.value+1));
+  newGame();
+});
+
+/* ---- Ask Ivy ---------------------------------------------------------------
+   She answers in the caption under her picture. Advice runs her own search on
+   your side of the board, so the move she points at is the one she would make
+   holding your pieces. */
+const askMenu=document.getElementById('askmenu');
+const closeAsk=()=>askMenu.removeAttribute('open');
+
+document.getElementById('askUndo').addEventListener('click',()=>{
+  closeAsk();
+  if(busy||replay) return;
+  if(undoMove()) ivySpeak('Of course!', 2600);
+  else ivySpeak('There is nothing to take back yet.', 2600);
+});
+
+document.getElementById('askSwap').addEventListener('click',()=>{
+  closeAsk();
+  if(busy||replay||game.over()) return;
+  ivySpeak('Sure, we can swap sides!', 2600);
+  swapSides();
+});
+
+document.getElementById('askHint').addEventListener('click',()=>{
+  closeAsk();
+  if(busy||replay||game.over()||game.toMove()!==HUMAN||!game.canPlay(HUMAN)) return;
+  hushIvy();
+  busy=true; ivySpeak('Let me look.'); render();
+  // the search blocks, so hand the browser a frame to paint her thinking first
+  setTimeout(()=>{
+    const act=uct(game, 700);
+    let cell=act, deus=false;
+    if(act && typeof act==='object'){ cell=act.cell; deus=!!act.deus; }
+    busy=false;
+    if(typeof cell!=='number' || cell<0){ ivySpeak('I have nothing good here.', 2600); render(); return; }
+    const rank=deus ? DEUS : game.curRank();
+    advice={cell, rank, deus};
+    ivySpeak(`I think you should play your ${RANKNAME[rank]} here.`);
+    render();
+  }, 60);
+});
+document.getElementById('preview').addEventListener('change',()=>{ clearPreview(); render(); });
+document.getElementById('danger').addEventListener('change',render);
+/* A browser holds audio back until the page has been touched, so the track waits
+   for the first click or key and starts itself then. */
+const track=document.getElementById('track'), musicBox=document.getElementById('music');
+function startMusic(){
+  if(!musicBox.checked) return;
+  track.volume=0.5;
+  track.play().catch(()=>{});
+}
+for(const ev of ['pointerdown','keydown'])
+  window.addEventListener(ev, startMusic, {once:true});
+musicBox.addEventListener('change',()=>{ musicBox.checked ? startMusic() : track.pause(); });
+
+/* The lift is set on the board and inherited by every sprite, so nothing needs
+   redrawing when it moves. The toggle decides whether the ranks follow the
+   claims or stay where they are. Both settings are kept between visits, since
+   they are there to be settled by eye. */
+function applyLift(v, claimsOnly){
+  boardEl.style.setProperty('--lift-claim', String(v));
+  boardEl.style.setProperty('--lift-rank', claimsOnly ? '0' : String(v));
+  document.getElementById('liftval').textContent=v;
+  try{
+    localStorage.setItem('choral.lift', String(v));
+    localStorage.setItem('choral.liftclaims', claimsOnly ? '1' : '0');
+  }catch(err){}
+}
+/* The slider is put away. Turn this on to bring it back and the stored setting
+   comes with it. While it is off the lift is pinned at nothing, which also
+   clears any value left over from tuning. */
+const LIFT_CONTROLS = false;
+(function(){
+  const slider=document.getElementById('lift'), only=document.getElementById('liftclaims');
+  if(!LIFT_CONTROLS){ document.getElementById('liftrow').hidden=true; applyLift(0,true); return; }
+  document.getElementById('liftrow').hidden=false;
+  try{
+    const v=localStorage.getItem('choral.lift');
+    if(v!==null && v!=='') slider.value=v;
+    const c=localStorage.getItem('choral.liftclaims');
+    if(c!==null && c!=='') only.checked = c==='1';
+  }catch(err){}
+  const push=()=>applyLift(+slider.value, only.checked);
+  push();
+  slider.addEventListener('input',push);
+  only.addEventListener('change',push);
+})();
+document.getElementById('export').addEventListener('click',exportChronicle);
+document.getElementById('importbtn').addEventListener('click',()=>document.getElementById('importfile').click());
+document.getElementById('importfile').addEventListener('change',ev=>{
+  const f=ev.target.files&&ev.target.files[0];
+  if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>importChronicle(String(rd.result));
+  rd.onerror=()=>say('That file could not be read.');
+  rd.readAsText(f);
+  ev.target.value='';                       // so the same file can be loaded twice
+});
+document.getElementById('rwStart').addEventListener('click',()=>step(0));
+document.getElementById('rwPrev').addEventListener('click',()=>step(replay?replay.at-1:0));
+document.getElementById('rwNext').addEventListener('click',()=>step(replay?replay.at+1:0));
+document.getElementById('rwEnd').addEventListener('click',()=>step(replay?replay.moves.length:0));
+document.getElementById('rwAuto').addEventListener('click',()=>{ autoTimer?stopAuto():startAuto(); });
+document.getElementById('rwExit').addEventListener('click',()=>build(cfg.n));
+document.addEventListener('keydown',ev=>{
+  if(!replay) return;
+  if(ev.key==='ArrowLeft'){ step(replay.at-1); ev.preventDefault(); }
+  if(ev.key==='ArrowRight'){ step(replay.at+1); ev.preventDefault(); }
+  if(ev.key===' '){ autoTimer?stopAuto():startAuto(); ev.preventDefault(); }
+});
+preload();
+build(9);
+</script>
+
+<!-- Trained opponents, added alongside Ivy rather than replacing her.  All three
+     files are optional: if none have been exported yet they 404 harmlessly and
+     the menu is exactly as it was. -->
+<script src="nets/opponents.js"></script>
+<script src="nets/fixture.js"></script>
+<script src="neural.js"></script>
+<script>
+(function(){
+  if(!window.ChoralNeural) return;
+  const nets = ChoralNeural.list();
+  if(!nets.length) return;
+
+  /* The search runs for the number of simulations the rating was measured at,
+     not for a fixed time.
+
+     That is the opposite of how Ivy is budgeted, and deliberately.  Javascript
+     evaluates this network about ten times slower than the simulator does, so a
+     clock that felt right here would buy roughly half the search the rating was
+     earned with, and the number on the menu would be describing a stronger
+     player than the one across the board.  Matching the simulation count instead
+     means the label is true, at the price of a longer think.  The clock is still
+     there as a backstop so a slow machine cannot hang on a turn. */
+  const HARD_CAP_MS = 12000;
+
+  window.pickNeural = function(g, name){
+    const net = ChoralNeural.get(name);
+    if(!net){ return pickSharp(g); }
+    const doc = window.CHORAL_NETS[name] || {};
+    const t0 = performance.now();
+    const r = ChoralNeural.puct(net, g, {sims: doc.sims || 200, deadlineMs: HARD_CAP_MS});
+    const sims = r.visits ? r.visits.reduce((a,b)=>a+b,0) : 0;
+    window.choralLastThink = {ms: Math.round(performance.now()-t0), sims: sims,
+                              wanted: doc.sims||200, net: name};
+    return r.act;
+  };
+
+  const sel = document.getElementById('diff');
+  const grp = document.createElement('optgroup');
+  grp.label = 'Trained in the league';
+  for(const n of nets){
+    const o = document.createElement('option');
+    o.value = 'net:' + n.name;
+    const cr = n.rating ? '  ~' + n.rating : '';
+    const style = n.style && n.styleText ? '  (' + n.styleText + ')' : '';
+    o.textContent = n.name + cr + style;
+    grp.appendChild(o);
+  }
+  sel.appendChild(grp);
+})();
+</script>
+</body>
+</html>
+
