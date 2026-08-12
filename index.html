@@ -2194,12 +2194,22 @@ build(9);
 
 <!-- Trained opponents, added alongside Ivy rather than replacing her.  All three
      files are optional: if none have been exported yet they 404 harmlessly and
-     the menu is exactly as it was. -->
+     the menu is exactly as it was.
+
+     Held back for now, so Ivy offers her own three settings and nothing else.
+     The block below already stands down when ChoralNeural is missing, and the
+     turn that picks a move already falls back to Sharp, so uncommenting these
+     three lines is the whole of putting the trained opponents back.  They are
+     also about half a megabyte between them, which is not weight a menu nobody
+     can reach should cost every visitor. -->
+<!--
 <script src="nets/opponents.js"></script>
 <script src="nets/fixture.js"></script>
 <script src="neural.js"></script>
+-->
 <script>
 (function(){
+  // nothing to add to the menu when the files above are not loaded
   if(!window.ChoralNeural) return;
   const nets = ChoralNeural.list();
   if(!nets.length) return;
