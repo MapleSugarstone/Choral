@@ -1,3 +1,7 @@
+# Chronicles kept for working on the replay view. They are exports of ordinary
+# games, so they mean nothing to anyone else.
+test replays/
+
 # Windows writes these into any folder it has drawn thumbnails for, and Assets is
 # the obvious candidate.
 Thumbs.db

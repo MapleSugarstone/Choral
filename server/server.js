@@ -75,9 +75,10 @@ function allowGlobal(cost) {
 const players = () => seats.size;
 const seatsFrom = ip => { let n = 0; for (const s of seats.values()) if (s.ip === ip) n++; return n; };
 
-function newRoom(code, priv, board) {
+function newRoom(code, priv, board, roll) {
   return {
     code, private: priv, board, version: 1,
+    roll,                         // the first player's half of the draw for colours
     names: [null, null],          // by seat, 0 is red and moves first
     present: [false, false],
     moves: [],                    // {c: cell, d: 0 or 1}
@@ -124,6 +125,31 @@ function startIfReady(room) {
     room.stamp = now();
     room.version++;
   }
+}
+
+// The second player sits down and the colours are settled. Each side drew a
+// number when it arrived; the two are added, and an odd total swaps them. So
+// neither player picks their own colour and the host no longer always opens.
+// Red is still seat 0. What the draw decides is which of the two is sitting in it.
+function seatSecond(room, name, roll, ip) {
+  const swap = (room.roll + roll) % 2 === 1;
+  const seat = swap ? 0 : 1;
+  const token = fresh();
+  if (swap) {
+    // Runs before the new token goes in, so the scan can only find the incumbent.
+    for (const at of seats.values())
+      if (at.code === room.code && at.seat === 0) at.seat = 1;
+    room.names = [name, room.names[0]];
+  } else {
+    room.names[1] = name;
+  }
+  // The clocks are untouched until a game starts, so there is nothing to swap
+  // there. Anything added to a room before the start does need swapping here.
+  seats.set(token, { code: room.code, seat, ip });
+  room.present = [true, true];
+  room.touched = now();
+  startIfReady(room);          // bumps the version, so the first player's poll
+  return { token, seat };      // wakes and reads back whichever seat it now holds
 }
 
 function dropRoom(code) {
@@ -215,12 +241,22 @@ function boardOf(body) {
   return BOARDS.has(b) ? b : 9;
 }
 
+// Each side draws a number when it sits down, and the total settles the colours.
+// A client that sends nothing, or nonsense, has one drawn for it here, so a page
+// loaded before a redeploy still gets a fair draw rather than a fixed seat.
+const ROLL_MAX = 2 ** 32;
+function rollOf(body) {
+  const n = Number(body.roll);
+  return Number.isInteger(n) && n >= 0 && n < ROLL_MAX ? n : crypto.randomInt(ROLL_MAX);
+}
+
 // ---- joining ---------------------------------------------------------------
 function doSeek(res, body, priv, ip) {
   const name = String(body.name || '').trim();
   if (!NAME_OK.test(name))
     return send(res, 400, { error: 'names are 1 to 16 letters, digits, space, dash or underscore' });
   const board = boardOf(body);
+  const roll = rollOf(body);
   sweep();
   if (seatsFrom(ip) >= MAX_SEATS_PER_IP)
     return send(res, 429, { error: 'you already have a game open' });
@@ -229,7 +265,7 @@ function doSeek(res, body, priv, ip) {
 
   if (priv) {
     const code = freshCode();
-    const room = newRoom(code, true, board);
+    const room = newRoom(code, true, board, roll);
     rooms.set(code, room);
     const token = fresh();
     seats.set(token, { code, seat: 0, ip });
@@ -244,16 +280,12 @@ function doSeek(res, body, priv, ip) {
     const room = rooms.get(at.code);
     if (!room || room.present[1] || room.board !== board) continue;
     queue.splice(i, 1);
-    const token = fresh();
-    seats.set(token, { code: at.code, seat: 1, ip });
-    room.names[1] = name; room.present[1] = true;
-    room.touched = now();
-    startIfReady(room);
-    return send(res, 200, { token, code: at.code, seat: 1, state: view(room, 1) });
+    const sat = seatSecond(room, name, roll, ip);
+    return send(res, 200, { token: sat.token, code: at.code, seat: sat.seat, state: view(room, sat.seat) });
   }
 
   const code = freshCode();
-  const room = newRoom(code, false, board);
+  const room = newRoom(code, false, board, roll);
   rooms.set(code, room);
   const token = fresh();
   seats.set(token, { code, seat: 0, ip });
@@ -276,13 +308,9 @@ function doJoin(res, body, ip) {
   if (room.present[1]) return send(res, 409, { error: 'that game is already full' });
   if (players() >= MAX_PLAYERS)
     return send(res, 503, { error: 'the lobbies are full for now', full: true });
-  const token = fresh();
-  seats.set(token, { code, seat: 1, ip });
-  room.names[1] = name; room.present[1] = true;
-  room.touched = now();
+  const sat = seatSecond(room, name, rollOf(body), ip);
   queue = queue.filter(q => (seats.get(q.token) || {}).code !== code);
-  startIfReady(room);
-  return send(res, 200, { token, code, seat: 1, state: view(room, 1) });
+  return send(res, 200, { token: sat.token, code, seat: sat.seat, state: view(room, sat.seat) });
 }
 
 // ---- playing ---------------------------------------------------------------

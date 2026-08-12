@@ -52,6 +52,25 @@
     -webkit-font-smoothing:antialiased;
   }
   img{image-rendering:pixelated; image-rendering:crisp-edges}
+  /* Nothing on the playing surface is meant to be selected. Dragging across the
+     board picked out the artwork and whatever text sat beside it, and playing
+     quickly reads as a double click, which selects a word. A board is not a
+     document, so the parts you play with opt out and the parts you might want to
+     keep opt back in below.
+     Also kills the grey flash a phone paints over whatever was tapped. */
+  .boardwrap, .ivy, .cycle, .score, .ask, .lobbybox,
+  h1, .sub, #msg, button, select, label, .caret, .overscore, .banner{
+    -webkit-user-select:none; -moz-user-select:none; user-select:none;
+    -webkit-tap-highlight-color:transparent;
+  }
+  /* A sprite is not a thing to pick up and carry off. */
+  img{-webkit-user-drag:none; user-drag:none}
+  /* Read back the rules, the chronicle and the footer as normal text. The code
+     for a private game matters most: sharing it is the entire point, so it stays
+     selectable even though it sits on the board. */
+  .rules, #log, footer, .lobbycode, .lobbynote, input{
+    -webkit-user-select:text; -moz-user-select:text; user-select:text;
+  }
 
   /* Named areas, so Play Deus can sit in the side column on a wide screen and
      directly under the board when the layout folds to one column. */
@@ -615,11 +634,15 @@ class Game{
     }
     return {libs,n:cnt};
   }
-  legal(i){
+  /* Whether a square may be played. The side is normally whoever is to move, and
+     the screen passes one in to ask the other question: whether the enemy could
+     play here if it were their turn. The fast path above holds for anybody, so
+     the side is only read once the answer starts to depend on it. */
+  legal(i, who){
     if(this.kind[i]!==EMPTY) return false;
     const nb=this.cfg.nbr[i];
     for(let t=0;t<nb.length;t++) if(this.kind[nb[t]]===EMPTY) return true;   // fast path
-    const me=this.toMove(), S=scratch(this.cfg.cc);
+    const me=who||this.toMove(), S=scratch(this.cfg.cc);
     this.own[i]=me; this.kind[i]=PIECE;
     const kill=[];
     for(let t=0;t<nb.length;t++){
@@ -1194,7 +1217,7 @@ function buildCells(n){
     d.appendChild(im);
     d.addEventListener('click',()=>onClick(i));
     d.addEventListener('mouseenter',()=>onHover(i));
-    d.addEventListener('mouseleave',clearPreview);
+    d.addEventListener('mouseleave',onLeave);
     boardEl.appendChild(d); cells.push(d); imgs.push(im);
   }
 }
@@ -1208,6 +1231,7 @@ function build(n){
   if(!cfg || cfg.n!==n || !cells.length) buildCells(n);
   game=new Game(cfg);
   busy=false; deusMode=false; replay=null; justSwapped=false; setMood('idle');
+  hoverAt=-1;                     // a rebuilt board is not under the pointer yet
   // the rules quote the count for the board in play, so it only moves when the
   // board does
   document.getElementById('deadlinen').textContent=game.deadline(); hushIvy();
@@ -1303,16 +1327,33 @@ function render(){
   }
   // Mark every band short of open ground, for both sides, since it is open
   // information either way and counting it by eye is the hard part.
+  /* Counting open ground is not enough on its own. Extinguishing a band turns its
+     squares into land rather than back into open ground, so the piece that does
+     the extinguishing gains no room to breathe from it. A square that would take
+     a band's last ground is therefore often suicide, and refused. A band can sit
+     on one square of open ground that nobody is able to play, which is not
+     danger at all, and marking it red said the opposite of the truth.
+
+     So the mark asks whether the other side could actually play the ground,
+     rather than only how much of it is left. */
   if(document.getElementById('danger').checked){
     const S=scratch(cfg.cc), ver=++S.vAud;
     for(let i=0;i<cfg.cc;i++){
       if(game.kind[i]!==PIECE || S.aud[i]===ver) continue;
       const r=game.groupLibs(i,S.grp);
-      for(let q=0;q<r.n;q++) S.aud[S.grp[q]]=ver;
-      if(r.libs<=2){
-        const mark=r.libs===1?'doomed':'shaky';
-        for(let q=0;q<r.n;q++) cells[S.grp[q]].classList.add(mark);
-      }
+      // Copied out, because legal() below floods through this same buffer.
+      const band=S.grp.slice(0,r.n);
+      for(const j of band) S.aud[j]=ver;
+      if(r.libs>2) continue;
+      const foe=3-game.own[i];
+      const ground=new Set();
+      for(const j of band)
+        for(const m of cfg.nbr[j]) if(game.kind[m]===EMPTY) ground.add(m);
+      let open=0;
+      for(const g of ground) if(game.legal(g,foe)) open++;
+      if(!open) continue;                    // nobody can close on it, so it stands
+      const mark=r.libs===1?'doomed':'shaky';
+      for(const j of band) cells[j].classList.add(mark);
     }
   }
   document.getElementById('n1').textContent=game.score[0];
@@ -1363,6 +1404,10 @@ function render(){
   label.textContent = sendingDeus ? RANKNAME[DEUS] : RANKNAME[game.curRank()];
   label.classList.toggle('deus', sendingDeus);
   drawCycle();
+  // Last, since the loop above rebuilt every square's classes and would have
+  // painted over it. Put back rather than kept, so it always reflects the board
+  // as it stands now, Deus included.
+  paintPreview(hoverAt);
 }
 
 function drawCycle(){
@@ -1382,15 +1427,29 @@ function drawCycle(){
 /* The toggle governs whether the land a piece would claim is shown. What a
    piece would extinguish is always shown, since that is a consequence of the
    move rather than a reading of the position. */
-function onHover(i){
+/* Which square the pointer is over, remembered rather than left to the marks on
+   the board. Every render builds each square's classes again from nothing, which
+   wiped a preview that was already showing. The pointer had not moved, so no
+   fresh mouseenter was coming and the highlight stayed gone until it left the
+   square and came back. Playing quickly hit this every time, since a move
+   redraws the board while the pointer is already resting on the next square.
+   Holding the square instead means a redraw can put the preview back. */
+let hoverAt=-1;
+function paintPreview(i){
   if(busy||replay||game.over()||!humanTurn()) return;
+  if(i<0||i>=cells.length) return;
   if(game.kind[i]!==EMPTY||!game.legal(i)) return;
   const {claimed,killed}=game.peek(i,deusMode&&game.canDeus(seat()));
   if(document.getElementById('preview').checked)
     for(const j of claimed) cells[j].classList.add('take');
   for(const j of killed) cells[j].classList.add('die');
 }
-function clearPreview(){ for(const c of cells) c.classList.remove('take','die'); }
+function onHover(i){ hoverAt=i; clearMarks(); paintPreview(i); }
+function onLeave(){ hoverAt=-1; clearMarks(); }
+function clearMarks(){ for(const c of cells) c.classList.remove('take','die'); }
+// Leaves the remembered square alone, so a redraw still knows where to put the
+// preview back. Only the pointer leaving forgets it.
+function clearPreview(){ clearMarks(); }
 function say(t){ msgEl.textContent=t; }
 
 /* The chronicle is kept on the UI side rather than inside Game. The search
@@ -1959,6 +2018,10 @@ function netVerdict(o){
 function netTake(st){
   if(!net || st.version<net.version) return;      // an older answer overtook a newer one
   net.version=st.version; net.names=st.names;
+  // The draw for colours is settled when the second player sits down, which is
+  // after the first one was told where it was sitting. So the seat is read back
+  // rather than kept, and it is read before netBegin below writes the banner.
+  net.seat=st.seat;
   net.clock=st.clock; net.clockAt=Date.now(); net.turn=st.turn;
   if(!net.started && st.started) netBegin(st);
   else if(net.started) netApply(st);
@@ -2022,12 +2085,20 @@ async function netWatch(){
 
 const upper=s=>s.charAt(0).toUpperCase()+s.slice(1);
 
+/* This browser's half of the draw for colours. The server adds it to the other
+   player's half and the total says who takes red, so neither side is choosing
+   its own banner and neither one can be the host every time. */
+function netRoll(){
+  try{ return crypto.getRandomValues(new Uint32Array(1))[0]; }
+  catch(e){ return Math.floor(Math.random()*4294967296); }
+}
+
 async function netOpen(kind){
   const name=document.getElementById('netname').value.trim();
   if(!NET_NAME_OK.test(name))
     return showLobby('menu','A name is one to sixteen letters, digits, spaces, dashes or underscores.');
   const board=+document.getElementById('netboard').value;
-  const body={name, board};
+  const body={name, board, roll:netRoll()};
   let path = kind==='host'?'/api/host' : kind==='join'?'/api/join' : '/api/seek';
   if(kind==='join'){
     const code=document.getElementById('netcode').value.trim().toUpperCase();
