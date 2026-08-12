@@ -213,6 +213,10 @@
   .score{display:flex; gap:8px}
   .sc{flex:1; text-align:center; padding:8px 4px; background:#131118; border:2px solid var(--line)}
   .sc.act{border-color:var(--gold)}
+  /* Names what the big number counts. The box also carries a piece count lower
+     down, so the two are easy to read as the same measure without it. */
+  .sc .cap{font-size:9px; color:var(--dim); text-transform:uppercase;
+           letter-spacing:.12em; margin-bottom:4px}
   .sc .n{font-size:26px; font-weight:700; line-height:1}
   .sc .l{font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.1em; margin-top:3px}
   .sc .sub2{font-size:10px; color:var(--dim); margin-top:2px; min-height:13px}
@@ -455,8 +459,8 @@
     <div class="panel">
       <h2>Pieces</h2>
       <div class="score">
-        <div class="sc p1" id="sc1"><div class="n" id="n1">0</div><div class="l" id="l1">You</div><div class="sub2" id="c1"></div></div>
-        <div class="sc p2" id="sc2"><div class="n" id="n2">0</div><div class="l" id="l2">Ivy</div><div class="sub2" id="c2"></div></div>
+        <div class="sc p1" id="sc1"><div class="cap">Support</div><div class="n" id="n1">0</div><div class="l" id="l1">You</div><div class="sub2" id="c1"></div></div>
+        <div class="sc p2" id="sc2"><div class="cap">Support</div><div class="n" id="n2">0</div><div class="l" id="l2">Ivy</div><div class="sub2" id="c2"></div></div>
       </div>
     </div>
 
@@ -1376,9 +1380,9 @@ function render(){
   document.getElementById('n2').textContent=game.score[1];
   for(const p of [1,2]){
     const bits=[`${game.left(p)} left`];
-    if(game.deusCell[p-1]>=0) bits.push('Deus afield');
+    if(game.deusCell[p-1]>=0) bits.push('Deus has landed');
     else if(game.deusUsed[p-1]) bits.push('Deus extinguished');
-    else if(!game.canDeus(p)) bits.push('Deus stayed home');
+    else if(!game.canDeus(p)) bits.push('Deus stayed in the heavens');
     document.getElementById('c'+p).textContent=bits.join(', ');
   }
   document.getElementById('l1').textContent = sideLabel(1);
@@ -1402,8 +1406,8 @@ function render(){
   db.classList.toggle('on',deusMode);
   const window_ = game.left(seat())-game.deadline();   // pieces left before the deadline
   db.textContent = !game.hasDeus(seat())
-      ? (game.deusCell[seat()-1]>=0?'Deus is afield':'Deus was extinguished')
-      : window_<=0 ? 'Deus stayed home'
+      ? (game.deusCell[seat()-1]>=0?'Deus has landed':'Deus was extinguished')
+      : window_<=0 ? 'Deus stayed in the heavens'
       : deusMode ? 'Choose their square, or cancel'
       : `Play Deus  (${window_} turn${window_===1?'':'s'} left to send them)`;
   const face = game.over() ? 'Gameover' : ivyMood==='owch' ? 'Owch' : busy ? 'Thinking' : 'Idle';
