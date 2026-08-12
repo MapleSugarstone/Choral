@@ -2321,8 +2321,79 @@ function sfxFor(name){
   }
   return a;
 }
+/* An element can only be in one place at once. Asked to sound again while it is
+   still going, it rewinds, which cuts the first one short rather than laying the
+   second over it. Placing runs most of a second and Ivy answers inside that, so
+   every exchange chopped itself in half.
+
+   Decoding each file once and starting a fresh voice per sound fixes it. Voices
+   are independent, so any number overlap, and starting one is immediate rather
+   than a request to a media element.
+
+   Two things are measured off the decoded sound rather than written down here,
+   so replacing a file needs no numbers changed:
+
+   Where it begins. Several of these open with silence, up to 181ms in the case
+   of Deus, which is over half of that file. Played from zero it reads as the
+   game being slow to answer. Playback starts at the first sound instead.
+
+   How loud it is. They peak between 0.49 and 0.91 of full scale, so a volume of
+   0.75 meant very different things depending on the file. The peak is divided
+   out, which makes the setting mean the loudness you actually get.
+
+   A limiter sits across the end because normalising invites the sum of two
+   overlapping sounds past full scale, and that clips harshly. */
+const AC = window.AudioContext || window.webkitAudioContext;
+let actx=null, sfxOut=null;
+const buffers={}, onsets={}, gains={};
+
+function audio(){
+  if(actx || !AC) return actx;
+  actx=new AC();
+  sfxOut=actx.createDynamicsCompressor();
+  sfxOut.threshold.value=-3; sfxOut.knee.value=0; sfxOut.ratio.value=20;
+  sfxOut.attack.value=0.002; sfxOut.release.value=0.12;
+  sfxOut.connect(actx.destination);
+  return actx;
+}
+
+// The first moment above this counts as the beginning. Only the opening half
+// second is searched, so a quiet sound is never mistaken for an empty one.
+const FLOOR=0.02;
+function measure(name, buf){
+  const d=buf.getChannelData(0), n=d.length;
+  const look=Math.min(n, (buf.sampleRate*0.5)|0);
+  let start=0, peak=0;
+  for(let i=0;i<n;i++){ const v=Math.abs(d[i]); if(v>peak) peak=v; }
+  for(let i=0;i<look;i++) if(Math.abs(d[i])>FLOOR){ start=i/buf.sampleRate; break; }
+  onsets[name]=start;
+  gains[name]=peak>0.01 ? 1/peak : 1;      // a silent file is left alone
+}
+
+async function decodeSfx(name){
+  const ctx=audio(); if(!ctx || buffers[name]) return;
+  try{
+    const res=await fetch(ART+SFX[name].file);
+    const buf=await ctx.decodeAudioData(await res.arrayBuffer());
+    buffers[name]=buf; measure(name, buf);
+  }catch(e){ /* the element below still covers it */ }
+}
+
 function sfx(name){
   if(!soundBox.checked) return;
+  const ctx=audio(), buf=buffers[name];
+  if(!ctx || !buf) return sfxElement(name);   // not decoded yet, or no Web Audio here
+  if(ctx.state==='suspended') ctx.resume();
+  const src=ctx.createBufferSource(), g=ctx.createGain();
+  src.buffer=buf;
+  g.gain.value=SFX[name].vol*gains[name];
+  src.connect(g); g.connect(sfxOut);
+  src.start(0, onsets[name]);                 // past the silence at the front
+}
+
+// Kept for the moment before a sound has decoded, and for anywhere without Web
+// Audio. It cannot overlap, which is the whole reason for the above.
+function sfxElement(name){
   const a=sfxFor(name);
   if(!a) return;
   a.volume=SFX[name].vol;
@@ -2337,7 +2408,8 @@ let sfxWarm=false;
 function warmSfx(){
   if(sfxWarm || !soundBox.checked) return;
   sfxWarm=true;
-  for(const name in SFX) sfxFor(name);
+  audio();
+  for(const name in SFX){ sfxFor(name); decodeSfx(name); }
 }
 for(const ev of GESTURES) window.addEventListener(ev, warmSfx, {once:true});
 // Turned off at the first gesture means nothing was fetched, so turning it back
