@@ -51,8 +51,8 @@ address. This fits inside the free tier at this size.
 | --- | --- | --- |
 | `PORT` | 8790 | set by Cloud Run |
 | `MAX_PLAYERS` | 10 | seats in the whole lobby |
-| `MAX_SEATS_PER_IP` | 2 | games one address may hold at once |
-| `MAX_WAITING` | 40 | requests held open at once |
+| `MAX_SEATS_PER_IP` | 3 | games one address may hold at once. A household shares one address, so this is seats per household |
+| `MAX_WAITING` | `MAX_PLAYERS` + 10 | requests held open at once |
 | `POOL_SECONDS` | 600 | each clock starts here |
 | `INCREMENT` | 2 | seconds returned for placing a piece |
 | `ALLOW_ORIGIN` | `*` | the site allowed to call the API |
@@ -60,8 +60,10 @@ address. This fits inside the free tier at this size.
 ## Protections
 
 - **Flooding.** 40 tokens per address refilling at 8 a second. A request costs 2,
-  a poll costs 0.25. A second bucket covers all traffic, since the address comes
-  from a header and can be faked.
+  a poll costs 0.25. The address is the last `X-Forwarded-For` entry, the one
+  Cloud Run itself appends; the earlier entries are client supplied. A second
+  bucket covers all traffic as a backstop. Behind a proxy that is not Cloud Run,
+  check which entry is the trustworthy one.
 - **Lobby capacity.** `MAX_PLAYERS` total, `MAX_SEATS_PER_IP` per address. Past
   that, arrivals get 503 with `full: true` rather than an empty room.
 - **Large or slow requests.** Bodies cap at 2048 bytes. Headers must arrive in 10

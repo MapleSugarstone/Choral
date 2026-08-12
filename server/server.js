@@ -20,8 +20,11 @@ const ROOM_IDLE_MS = num('ROOM_IDLE_MS', 45 * 60 * 1000);
 const SEEK_IDLE_MS = num('SEEK_IDLE_MS', 5 * 60 * 1000);
 
 const MAX_PLAYERS = num('MAX_PLAYERS', 10);      // past this, arrivals are told it is full
-const MAX_SEATS_PER_IP = num('MAX_SEATS_PER_IP', 2);
-const MAX_WAITING = num('MAX_WAITING', 40);      // long polls held open at once
+// A household shares one public address, so this is really seats per household.
+const MAX_SEATS_PER_IP = num('MAX_SEATS_PER_IP', 3);
+// Sits above MAX_PLAYERS so a full lobby can still hold every poll open. At the
+// ceiling, polls are answered at once and clients fall into fast re-asking.
+const MAX_WAITING = num('MAX_WAITING', MAX_PLAYERS + 10);
 const ALLOW_ORIGIN = process.env.ALLOW_ORIGIN || '*';
 
 const BOARDS = new Set([7, 9, 11]);
@@ -197,10 +200,13 @@ function seatOf(token) {
   return { room, seat: at.seat, code: at.code };
 }
 
-// Client supplied and forgeable, so it only ever narrows a limit.
+// Cloud Run's frontend appends the caller's real address to whatever the caller
+// already put in the header, so only the last entry can be believed. Anything
+// earlier is client supplied, and trusting it would let one caller pose as a
+// fresh address on every request.
 function ipOf(req) {
   const fwd = req.headers['x-forwarded-for'];
-  const raw = fwd ? String(fwd).split(',')[0].trim() : req.socket.remoteAddress;
+  const raw = fwd ? String(fwd).split(',').pop().trim() : req.socket.remoteAddress;
   return (raw || 'unknown').slice(0, 45);
 }
 
@@ -280,9 +286,12 @@ function doJoin(res, body, ip) {
 }
 
 // ---- playing ---------------------------------------------------------------
-function doState(res, query) {
-  const token = String(query.get('token') || '');
-  const since = parseInt(query.get('since') || '0', 10) || 0;
+// POSTed now, so the token stays out of the URL: Cloud Run writes every request
+// line to its logs, and a query string would leave live seat tokens in them.
+// The GET form still answers, for pages loaded before a redeploy.
+function doState(res, query, body) {
+  const token = String(body.token || query.get('token') || '');
+  const since = parseInt(body.since || query.get('since') || '0', 10) || 0;
   if (waiting >= MAX_WAITING) {
     const { room, seat } = seatOf(token);
     if (!room) return send(res, 404, { error: 'that game is gone' });
@@ -385,7 +394,7 @@ const server = http.createServer(async (req, res) => {
     case '/api/seek':   return doSeek(res, body, false, ip);
     case '/api/host':   return doSeek(res, body, true, ip);
     case '/api/join':   return doJoin(res, body, ip);
-    case '/api/state':  return doState(res, url.searchParams);
+    case '/api/state':  return doState(res, url.searchParams, body);
     case '/api/move':   return doMove(res, body);
     case '/api/resign': return doResign(res, body);
     case '/api/cancel': return doCancel(res, body);

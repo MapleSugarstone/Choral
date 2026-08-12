@@ -2007,7 +2007,8 @@ async function netWatch(){
   let misses=0;
   while(net && mine===netPollGen){
     let r=null;
-    try{ r=await netCall('GET','/api/state?token='+encodeURIComponent(net.token)+'&since='+net.version); }
+    // POST keeps the token out of the URL, which the server's host logs record.
+    try{ r=await netCall('POST','/api/state',{token:net.token, since:net.version}); }
     catch(e){}
     if(!net || mine!==netPollGen) return;
     if(!r){ if(++misses>=4) return netLost('The connection to the server was lost.');
