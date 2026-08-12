@@ -12,21 +12,25 @@
 <title>Choral</title>
 <link rel="icon" type="image/png" href="favicon.png">
 <meta name="description" content="A Denlish game of Strategy.">
-<!-- What a link to the game shows when it is pasted somewhere. The paths are
-     relative, which most places resolve against the page they came from. Once
-     the game has an address of its own, writing these two out in full is what
-     covers the places that do not. -->
+<!-- What a link to the game shows when it is pasted somewhere. The image address
+     is written out in full on purpose. A relative one is resolved by some places
+     and quietly ignored by the rest, which shows as no picture at all rather
+     than as an error. It has to be changed if the game ever moves. -->
 <meta property="og:type" content="website">
+<meta property="og:site_name" content="Choral">
+<meta property="og:url" content="https://maplesugarstone.github.io/Choral/">
 <meta property="og:title" content="Choral">
 <meta property="og:description" content="A Denlish game of Strategy.">
-<meta property="og:image" content="preview.png">
+<meta property="og:image" content="https://maplesugarstone.github.io/Choral/preview.png">
+<meta property="og:image:secure_url" content="https://maplesugarstone.github.io/Choral/preview.png">
+<meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="640">
 <meta property="og:image:alt" content="Ivy standing beside a boxed copy of Choral.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Choral">
 <meta name="twitter:description" content="A Denlish game of Strategy.">
-<meta name="twitter:image" content="preview.png">
+<meta name="twitter:image" content="https://maplesugarstone.github.io/Choral/preview.png">
 <style>
   :root{
     --bg:#15131a; --panel:#1d1a23; --line:#3b3546; --ink:#e9e4dc; --dim:#8d8698;
@@ -511,6 +515,9 @@
 </div>
 
 <audio id="track" src="Assets/Choral.mp3" loop preload="metadata"></audio>
+<!-- Small enough to hold in full, and it has to sound the moment it is asked for
+     rather than after a fetch. -->
+<audio id="connectsfx" src="Assets/Connect.wav" preload="auto"></audio>
 
 <script>
 "use strict";
@@ -1960,6 +1967,9 @@ function netTake(st){
 }
 function netBegin(st){
   net.started=true; net.names=st.names;
+  // First, because the point of the sound is to reach someone who stopped
+  // watching the screen while they waited.
+  playConnect();
   netPlay=true; hideLobby();
   document.getElementById('netpanel').hidden=false;
   document.getElementById('netnote').textContent =
@@ -2148,16 +2158,41 @@ document.getElementById('askHint').addEventListener('click',()=>{
 document.getElementById('preview').addEventListener('change',()=>{ clearPreview(); render(); });
 document.getElementById('danger').addEventListener('change',render);
 /* A browser holds audio back until the page has been touched, so the track waits
-   for the first click or key and starts itself then. */
+   for a gesture and starts itself then.
+
+   Every gesture is tried, rather than only the first. One attempt is not enough
+   on a phone: preload is ignored on a mobile connection, so at the first touch
+   the track has not begun loading and the attempt is refused. A listener that
+   removed itself after that one try left the music off for the whole visit,
+   which is why turning the setting off and on again was the only thing that
+   brought it back.
+
+   Nothing needs removing afterwards. A track already playing fails the paused
+   check and the handler does nothing, so it settles by itself. */
 const track=document.getElementById('track'), musicBox=document.getElementById('music');
+const GESTURES=['pointerdown','pointerup','touchend','click','keydown'];
 function startMusic(){
-  if(!musicBox.checked) return;
+  if(!musicBox.checked || !track.paused) return;
   track.volume=0.5;
-  track.play().catch(()=>{});
+  const going=track.play();               // older browsers return nothing here
+  if(going && going.catch) going.catch(()=>{});
 }
-for(const ev of ['pointerdown','keydown'])
-  window.addEventListener(ev, startMusic, {once:true});
+for(const ev of GESTURES) window.addEventListener(ev, startMusic);
 musicBox.addEventListener('change',()=>{ musicBox.checked ? startMusic() : track.pause(); });
+
+/* Sounded when an opponent takes the other seat. It follows the Music setting,
+   since that is the only say a player has over sound from this page and someone
+   who turned it off did so for a reason. It sits a little above the track so it
+   carries over it. Rewound first, or a second game in the same sitting would
+   find it already at the end and play nothing. */
+function playConnect(){
+  if(!musicBox.checked) return;
+  const sfx=document.getElementById('connectsfx');
+  if(!sfx) return;
+  sfx.volume=0.6;
+  try{ sfx.currentTime=0; }catch(e){}
+  sfx.play().catch(()=>{});
+}
 
 /* The lift is set on the board and inherited by every sprite, so nothing needs
    redrawing when it moves. The toggle decides whether the ranks follow the
@@ -2226,8 +2261,13 @@ build(9);
      The block below already stands down when ChoralNeural is missing, and the
      turn that picks a move already falls back to Sharp, so uncommenting these
      three lines is the whole of putting the trained opponents back.  They are
-     also about half a megabyte between them, which is not weight a menu nobody
-     can reach should cost every visitor. -->
+     also about a megabyte and a half between them, which is not weight a menu
+     nobody can reach should cost every visitor.
+
+     The networks are not good enough to ship yet: the best of them sits above
+     greedy play and the defended camp, but below a Deus hunter and well below
+     every setting of the brain Ivy already uses.  Worth revisiting once the
+     league has something that can take a game off Locked in. -->
 <!--
 <script src="nets/opponents.js"></script>
 <script src="nets/fixture.js"></script>

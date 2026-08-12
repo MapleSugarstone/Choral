@@ -268,15 +268,39 @@
     bcast(39, Math.max(0, g.left(foe) - dl) / g.budget);
   };
 
-  /* Which actions the rules allow, indexed like the policy head. */
+  /* Which actions the search may consider — a mirror of Enc.Legal in the
+     simulator, and it MUST stay a mirror.
+
+     This is not merely the rules: it is the same restriction every policy in the
+     game uses (the rim, or a square beside an occupied one), with the Deus
+     narrowed further to squares touching your own holdings once you are
+     developed. The network's policy head is trained with its softmax normalised
+     over exactly this set, so widening it here would feed the net a support it
+     never saw and quietly change every probability it reports. If the two
+     definitions drift apart, choralNetSelfTest() fails — which is what it is
+     for. */
   function legalMask(g, cells, out) {
     out.fill(false);
     const me = g.toMove();
     if (!g.canPlay(me)) { out[2 * cells] = true; return 1; }
     const mv = g.moves();
     const deus = g.canDeus(me);
+    const developed = g.stones[me - 1] >= 4;
     let count = 0;
-    for (const m of mv) { out[m] = true; count++; if (deus) { out[cells + m] = true; count++; } }
+    for (const i of mv) {
+      const nb = g.cfg.nbr[i];
+      let near = nb.length < 4, touchMine = false;      // rim counts as a candidate
+      for (let k = 0; k < nb.length; k++) {
+        const m = nb[k];
+        if (g.kind[m] === EMPTY) continue;
+        near = true;
+        if (g.own[m] === me) { touchMine = true; break; }
+      }
+      if (!near) continue;
+      out[i] = true; count++;
+      if (deus && developed && touchMine) { out[cells + i] = true; count++; }
+    }
+    if (count === 0) { for (const m of mv) { out[m] = true; count++; } }
     if (count === 0) { out[2 * cells] = true; count = 1; }
     return count;
   }
