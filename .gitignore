@@ -1,0 +1,5 @@
+# Windows writes these into any folder it has drawn thumbnails for, and Assets is
+# the obvious candidate.
+Thumbs.db
+desktop.ini
+.DS_Store

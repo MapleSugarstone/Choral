@@ -30,6 +30,12 @@
 <style>
   :root{
     --bg:#15131a; --panel:#1d1a23; --line:#3b3546; --ink:#e9e4dc; --dim:#8d8698;
+    /* Same colour as --line, and it exists because --line does not survive
+       everywhere. The board frame rewrites --line to a pixel width on .boardwrap
+       so the grid and its rules scale together, which means any border colour
+       written as var(--line) inside that subtree becomes "2px solid 2px" and is
+       thrown away whole. Anything under the board reaches for --edge instead. */
+    --edge:#3b3546;
     --board:#8b8778; --board2:#6f6b5d; --grid:#221f1b;
     --red:#a83a1e; --white:#f1ede3; --gold:#d9b45c; --advice:#e8557d;
   }
@@ -190,10 +196,15 @@
   .sc.p1 .n{color:var(--red)} .sc.p2 .n{color:var(--white)}
 
   .cycle{display:flex; gap:4px}
-  .cyc{flex:1; text-align:center; padding:5px 1px 3px; background:#131118; border:2px solid var(--line)}
+  /* min-width holds the four boxes to a quarter each. Without it a long name
+     pushes its own box wider and the other three shrink around it, so the strip
+     stops reading as four equal turns. */
+  .cyc{flex:1; min-width:0; text-align:center; padding:5px 1px 3px;
+       background:#131118; border:2px solid var(--line)}
   .cyc.now{border-color:var(--gold)}
   .cyc img{margin:0 auto; display:block}
-  .cyc .who{font-size:9px; letter-spacing:.05em; text-transform:uppercase; color:var(--dim); margin-top:2px}
+  .cyc .who{font-size:9px; letter-spacing:.05em; text-transform:uppercase; color:var(--dim);
+            margin-top:2px; overflow-wrap:anywhere}
   .cyc.now .who{color:var(--gold)}
 
   .rules{font-size:12.5px; color:#c9c4bc}
@@ -256,17 +267,23 @@
          align-items:center; justify-content:center; justify-content:safe center;
          gap:10px; padding:16px; overflow:auto; background:rgba(21,19,26,.96)}
   #lobby[hidden]{display:none}
+  /* The same edge every panel carries. It reads clearly now for the plain reason
+     that it is drawn at all: written as var(--line) it landed under the board,
+     where that name means a width, and the whole declaration was thrown out. */
   .lobbybox{width:min(320px,100%); flex:none; background:var(--panel);
-            border:2px solid var(--line); padding:14px}
+            border:2px solid var(--edge); padding:14px}
   .lobbybox[hidden]{display:none}
+  /* The whole border is restated, not just its colour. The rule these inherit
+     from is the one being thrown away, so there is no width or style to keep. */
+  .lobbybox button, .lobbybox select{border:2px solid var(--edge)}
   .lobbybox h2{font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:var(--dim);
                margin:0 0 11px; font-weight:700}
   .lobbybox input[type=text]{flex:1; min-width:0; font:inherit; font-size:13px;
-        background:#131118; color:var(--ink); border:2px solid var(--line); padding:6px 9px}
+        background:#131118; color:var(--ink); border:2px solid var(--edge); padding:6px 9px}
   .lobbybox input[type=text]:focus{outline:none; border-color:var(--gold)}
   .lobbybox input#netcode{letter-spacing:.14em; text-transform:uppercase}
   .lobbynote{font-size:11px; line-height:1.6; color:var(--dim); margin:2px 0 10px}
-  .lobbybox hr{border:0; border-top:2px solid var(--line); margin:12px 0}
+  .lobbybox hr{border:0; border-top:2px solid var(--edge); margin:12px 0}
   /* Whatever went wrong is said above the menu and stays there until the next
      thing is chosen, so a game that stopped never looks like a game that ended. */
   .lobbyflag{width:min(320px,100%); flex:none; background:#2a1512; border:2px solid var(--red);
@@ -281,7 +298,11 @@
   .lobbycode[hidden]{display:none}
   /* The clocks borrow the piece counters, so one column reads the same way twice. */
   .sc.low .n{color:var(--red)}
-  .sc .l.who{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  /* A name of up to sixteen characters plus the word after it does not always sit
+     on one line in a box this wide, so it wraps rather than being cut short. An
+     ellipsis would hide the very thing the label is there to show, and a name
+     with no spaces in it still has to stay inside its box. */
+  .sc .l{overflow-wrap:anywhere}
 
   footer{grid-area:foot; margin-top:18px; padding-top:14px; border-top:2px solid var(--line);
          font-size:11px; line-height:1.8; color:var(--dim); text-align:center}
@@ -1135,11 +1156,16 @@ const netDecided=()=>netPlay&&net&&!!net.over;
 const humanTurn=()=>localPlay||(game.toMove()===mySeat()&&!netDecided());
 const sideName=p=>p===1?'Red':'White';
 const oppName=()=>(net&&net.names&&net.names[1-net.seat])||'Them';
+const myName=()=>(net&&net.names&&net.names[net.seat])||'You';
 /* What a side is called on the screen. Three arrangements share one board, so
-   the question is asked in one place rather than at every caption. */
+   the question is asked in one place rather than at every caption.
+
+   Against someone far away your own name is worth showing back to you. It is a
+   name you chose and it is the one they are looking at, so the panels carry it
+   next to the word rather than the word alone. */
 function sideLabel(p){
   if(localPlay) return sideName(p);
-  if(netPlay) return p===mySeat()?'You':oppName();
+  if(netPlay) return p===mySeat()?`${myName()} (You)`:oppName();
   return p===HUMAN?'You':'Ivy';
 }
 
@@ -1870,7 +1896,7 @@ function netClockDraw(){
   }
   document.getElementById('clkA').classList.toggle('act', net.started&&!net.over&&net.turn===net.seat);
   document.getElementById('clkB').classList.toggle('act', net.started&&!net.over&&net.turn!==net.seat);
-  document.getElementById('lA').textContent='You';
+  document.getElementById('lA').textContent=`${myName()} (You)`;
   document.getElementById('lB').textContent=oppName();
 }
 

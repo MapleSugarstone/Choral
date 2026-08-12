@@ -1,20 +1,9 @@
-// Choral matchmaking and relay.
+// Choral matchmaking and relay. No dependencies.
 //
-// No dependencies, so there is nothing to install and nothing to keep patched.
+// Pairs players, tracks whose turn it is, owns the two clocks. It does not know
+// the rules. Both clients run the engine and check each other's moves.
 //
-// What it is responsible for:
-//   - pairing players, by random queue or by an eight character code
-//   - deciding whose turn it is
-//   - owning the clock, which is the whole reason a server exists here
-//
-// What it is deliberately not responsible for: the rules. Both clients run the
-// same engine and agree on legality. The server checks that a move came from the
-// right player at the right time and relays it. Porting the whole rule set here
-// would double the code for a game played among friends, and the clock is the
-// only part a client cannot be trusted with.
-//
-// Run it:   node server.js          (listens on 8790)
-// On Cloud Run it reads PORT from the environment.
+// node server.js   listens on 8790. Cloud Run sets PORT.
 
 const http = require('http');
 const crypto = require('crypto');
@@ -30,16 +19,9 @@ const POLL_HOLD_MS = num('POLL_HOLD_MS', 25000); // how long a waiting request i
 const ROOM_IDLE_MS = num('ROOM_IDLE_MS', 45 * 60 * 1000);
 const SEEK_IDLE_MS = num('SEEK_IDLE_MS', 5 * 60 * 1000);
 
-// The lobby is sized for a handful of friends. Past this a new arrival is told
-// plainly that it is full rather than being dropped into a room that will never
-// fill, and the cap is what stops the memory this process holds from growing
-// with whoever happens to find the address.
-const MAX_PLAYERS = num('MAX_PLAYERS', 10);
-// One address cannot take the whole lobby by opening tabs.
+const MAX_PLAYERS = num('MAX_PLAYERS', 10);      // past this, arrivals are told it is full
 const MAX_SEATS_PER_IP = num('MAX_SEATS_PER_IP', 2);
-// Every waiting request holds a socket, so the number held at once is bounded.
-const MAX_WAITING = num('MAX_WAITING', 40);
-// Set to your own page once it is hosted, so no other site can drive the API.
+const MAX_WAITING = num('MAX_WAITING', 40);      // long polls held open at once
 const ALLOW_ORIGIN = process.env.ALLOW_ORIGIN || '*';
 
 const BOARDS = new Set([7, 9, 11]);
@@ -65,9 +47,7 @@ function freshCode() {
   }
 }
 
-// Token bucket, refilling at `refill` a second up to `cap`. Waiting is not
-// charged the same as asking, or a patient client would be punished for being
-// efficient.
+// Token bucket. Waiting costs less than asking, so polling is not punished.
 function allow(ip, cost, cap = 40, refill = 8) {
   const t = now();
   const b = buckets.get(ip) || { tokens: cap, last: t };
@@ -79,8 +59,7 @@ function allow(ip, cost, cap = 40, refill = 8) {
   return true;
 }
 
-// A second limit across everyone, so rotating addresses does not lift the
-// ceiling. An address is trivial to fake behind a proxy header.
+// Backstop across everyone, since an address can be faked in a header.
 function allowGlobal(cost) {
   const t = now();
   globalBucket.tokens = Math.min(600, globalBucket.tokens + ((t - globalBucket.last) / 1000) * 100);
@@ -108,9 +87,8 @@ function newRoom(code, priv, board) {
   };
 }
 
-// Take the time the mover has spent off their clock. Called before any change of
-// turn and before any state is reported, so a player who walks away runs down in
-// real time rather than at their next request.
+// Deduct time from the mover. Runs before every turn change and every read, so a
+// player who walks away runs down in real time.
 function charge(room) {
   if (room.over || room.stamp === null) return;
   const t = now();
@@ -162,7 +140,6 @@ function sweep() {
     if (at) { const r = rooms.get(at.code); if (r && r.started === null) rooms.delete(at.code); }
     return false;
   });
-  // addresses seen once should not be remembered forever
   if (buckets.size > 5000) {
     for (const [ip, b] of buckets) if (t - b.last > 10 * 60 * 1000) buckets.delete(ip);
   }
@@ -182,15 +159,8 @@ function send(res, code, body) {
   res.end(raw);
 }
 
-/* Answering a POST and closing while the client is still sending its body is a
-   reset rather than a clean finish. The client does not see it on this request,
-   which already has its answer. It sees it on the next one, which dies with a
-   connection error that has nothing to do with anything it did. That is worth
-   avoiding on the rejection paths above all, since being told to slow down has
-   to leave a client able to try again.
-
-   So a rejection throws the body away and waits for the end of it before
-   replying. Nothing is kept, and the wait is bounded by requestTimeout. */
+// Replying to a POST while the client is still sending resets its NEXT request.
+// Rejections drain the body and wait for the end of it first.
 function bail(req, res, code, body) {
   if (req.method === 'POST' && !req.readableEnded) {
     req.resume();
@@ -201,9 +171,7 @@ function bail(req, res, code, body) {
   send(res, code, body);
 }
 
-// A body far past the cap is not a mistake to answer politely. The socket is cut,
-// and the caller knows there is nobody left to reply to.
-const KILLED = Symbol('killed');
+const KILLED = Symbol('killed');   // body past the cap, socket already cut
 
 function readBody(req) {
   return new Promise(resolve => {
@@ -229,9 +197,7 @@ function seatOf(token) {
   return { room, seat: at.seat, code: at.code };
 }
 
-// Behind Cloud Run the first entry is the caller, but the header is client
-// supplied and can be invented, so it only ever narrows a limit and the global
-// one above is the real backstop.
+// Client supplied and forgeable, so it only ever narrows a limit.
 function ipOf(req) {
   const fwd = req.headers['x-forwarded-for'];
   const raw = fwd ? String(fwd).split(',')[0].trim() : req.socket.remoteAddress;
@@ -427,13 +393,9 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-/* A stalled or half open connection should not be able to sit on a socket. These
-   three are the guard, rather than a cap on connections. Node answers a request
-   past maxConnections by destroying the socket with no reply at all, and the
-   count it compares against includes sockets that are still closing, so a burst
-   of short requests trips it well under the real load and a player gets a reset
-   instead of being told to slow down. The buckets above and MAX_WAITING are what
-   actually hold the traffic down, and both of them say so in words. */
+// Bound stalled connections. Deliberately no maxConnections: Node answers past it
+// by destroying the socket with no reply, and its count includes sockets that are
+// still closing, so short bursts trip it well under real load.
 server.headersTimeout = 10000;
 server.requestTimeout = 20000;
 server.keepAliveTimeout = 30000;
