@@ -530,6 +530,7 @@
         <option value="2">Ivy (Locked in)</option>
       </select></label>
       <label><input type="checkbox" id="music" checked> Music</label>
+      <label><input type="checkbox" id="sound" checked> Sound effects</label>
       <label><input type="checkbox" id="preview" checked> Show the kingdoms a subject would claim</label>
       <div class="subnote">Pale means a kingdom formed, red means one conquered.</div>
       <label><input type="checkbox" id="danger" checked> Show subjects in danger</label>
@@ -551,9 +552,6 @@
 </div>
 
 <audio id="track" src="Assets/Choral.mp3" loop preload="metadata"></audio>
-<!-- Small enough to hold in full, and it has to sound the moment it is asked for
-     rather than after a fetch. -->
-<audio id="connectsfx" src="Assets/Connect.wav" preload="auto"></audio>
 
 <script>
 "use strict";
@@ -1262,6 +1260,7 @@ function build(n){
   // A board built behind the lobby is scenery. Nobody is sitting at it yet, so it
   // is left quiet and no turn is taken on it.
   if(lobbyOpen){ say(''); return; }
+  sfx('board');                   // silent on the first load, since nothing has been touched yet
   if(netPlay){
     say(mySeat()===1 ? 'You hold the red banner and move first. Place a '+RANKNAME[game.curRank()]+'.'
                      : 'You hold the white banner. '+oppName()+' opens.');
@@ -1539,6 +1538,7 @@ function onClick(i){
   const mineBefore=game.score[mover-1];
   const r=game.play(i,asDeus);
   logMove(mover,i,asDeus,rank,r);
+  moveSound(r, asDeus);
   if(!localPlay){
     const swing=game.score[mover-1]-mineBefore;
     const tookHerDeus=r.extinct.some(x=>x.side===IVY());
@@ -1608,6 +1608,7 @@ function advance(){
     const rank=game.curRank();
     const r=game.play(cell,deus);
     logMove(her,cell,deus,rank,r);
+    if(cell>=0) moveSound(r, deus);          // her turn is heard the same as yours
     const line = cell<0 ? 'Ivy passes.' : describe('Ivy',r,deus);
     say(justSwapped ? ('Ivy spends the turn you handed her. '+line).trim() : line);
     justSwapped=false;
@@ -1746,7 +1747,10 @@ function step(to){ stopAuto(); seekReplay(to); }
 /* The board dims and the outcome stands over it once the last piece is spent. */
 /* A banner may be handed in, since a game lost on the clock or given up is
    decided by something the holdings do not show. */
-function showOutcome(mine,hers,forced){
+/* Whether you won may also be handed in, and has to be when the holdings do not
+   say it. A game won on the clock is often won with the smaller holding, so
+   reading the result off the score would sound the wrong one. */
+function showOutcome(mine,hers,forced,won){
   document.getElementById('overbanner').textContent = forced ? forced : localPlay
     ? (mine>hers ? 'Red wins!' : hers>mine ? 'White wins!' : 'Even holdings')
     : netPlay
@@ -1772,6 +1776,12 @@ function showOutcome(mine,hers,forced){
   ask.hidden=!offer; harder.hidden=!offer;
   document.getElementById('over').hidden=false;
   boardEl.classList.add('done');
+  /* Two people at one board have no losing side to address, so the win sounds
+     for whoever took it and nobody is told they lost. */
+  const settled = won===undefined ? (mine>hers ? true : hers>mine ? false : null) : won;
+  if(localPlay) sfx('win');
+  else if(settled===true) sfx('win');
+  else if(settled===false) sfx('lose');
 }
 function hideOutcome(){
   document.getElementById('overask').hidden=true;
@@ -2021,6 +2031,9 @@ function netApply(st){
     }
     const rank=game.curRank(), r=game.play(cell, deus);
     logMove(mover, cell, deus, rank, r);
+    // Only what arrives from the other side. Your own already sounded when you
+    // pressed the square, and it comes back down the tape as well.
+    if(mover!==mySeat() && cell>=0) moveSound(r, deus);
     if(mover!==mySeat())
       say(cell<0 ? `${oppName()} passes.` : describe(oppName(), r, deus));
   }
@@ -2035,7 +2048,8 @@ function netVerdict(o){
   const won=o.winner===net.seat;
   say(o.why==='time' ? (won?`${oppName()} ran out of time.`:'You ran out of time.')
                      : (won?`${oppName()} resigned.`:'You resigned.'));
-  showOutcome(game.score[mySeat()-1], game.score[2-mySeat()], won?'You win!':oppName()+' wins');
+  showOutcome(game.score[mySeat()-1], game.score[2-mySeat()],
+              won?'You win!':oppName()+' wins', won);
 }
 function netTake(st){
   if(!net || st.version<net.version) return;      // an older answer overtook a newer one
@@ -2267,25 +2281,79 @@ const track=document.getElementById('track'), musicBox=document.getElementById('
 const GESTURES=['pointerdown','pointerup','touchend','click','keydown'];
 function startMusic(){
   if(!musicBox.checked || !track.paused) return;
-  track.volume=0.5;
+  track.volume=0.38;          // sits under the sounds, which carry the play
   const going=track.play();               // older browsers return nothing here
   if(going && going.catch) going.catch(()=>{});
 }
 for(const ev of GESTURES) window.addEventListener(ev, startMusic);
 musicBox.addEventListener('change',()=>{ musicBox.checked ? startMusic() : track.pause(); });
 
-/* Sounded when an opponent takes the other seat. It follows the Music setting,
-   since that is the only say a player has over sound from this page and someone
-   who turned it off did so for a reason. It sits a little above the track so it
-   carries over it. Rewound first, or a second game in the same sitting would
-   find it already at the end and play nothing. */
-function playConnect(){
-  if(!musicBox.checked) return;
-  const sfx=document.getElementById('connectsfx');
-  if(!sfx) return;
-  sfx.volume=0.6;
-  try{ sfx.currentTime=0; }catch(e){}
-  sfx.play().catch(()=>{});
+/* ---- sound effects ---------------------------------------------------------
+   These answer to their own setting rather than to Music. The track is
+   something to leave running or not, and the sounds are the board telling you
+   what just happened, so wanting one without the other is ordinary.
+
+   Each is held as its own element, built the first time it is wanted and kept
+   afterwards. Rewinding before every play matters: a sound already sitting at
+   its end plays nothing at all, which is what a second game in one sitting
+   would otherwise get. Volumes differ because they are heard at different
+   rates. Placing happens sixty times a game and sits below the rest, an ending
+   happens once and stands at the top. */
+const soundBox=document.getElementById('sound');
+const SFX={
+  place: {file:'Place.wav',     vol:0.75},
+  claim: {file:'Capture.wav',   vol:0.85},
+  deus:  {file:'Deus.wav',      vol:0.90},
+  join:  {file:'Connect.wav',   vol:0.90},
+  board: {file:'New board.mp3', vol:0.80},
+  win:   {file:'You win.wav',   vol:1.00},
+  lose:  {file:'You lose.wav',  vol:1.00},
+};
+const sfxPool={};
+function sfxFor(name){
+  const spec=SFX[name];
+  if(!spec) return null;
+  let a=sfxPool[name];
+  if(!a){
+    // encodeURI, since several of these have a space in the file name
+    a=sfxPool[name]=new Audio(encodeURI(ART+spec.file));
+    a.preload='auto';
+  }
+  return a;
+}
+function sfx(name){
+  if(!soundBox.checked) return;
+  const a=sfxFor(name);
+  if(!a) return;
+  a.volume=SFX[name].vol;
+  try{ a.currentTime=0; }catch(e){}
+  const going=a.play();
+  if(going && going.catch) going.catch(()=>{});
+}
+/* Fetched on the first gesture rather than at load, so they queue behind the
+   page and the track rather than racing them. Nothing can sound before a
+   gesture anyway. */
+let sfxWarm=false;
+function warmSfx(){
+  if(sfxWarm || !soundBox.checked) return;
+  sfxWarm=true;
+  for(const name in SFX) sfxFor(name);
+}
+for(const ev of GESTURES) window.addEventListener(ev, warmSfx, {once:true});
+// Turned off at the first gesture means nothing was fetched, so turning it back
+// on has to go and get them. Without this the first sound of the game waits on
+// a download, and a sound that arrives late is worse than one that does not.
+soundBox.addEventListener('change', warmSfx);
+
+function playConnect(){ sfx('join'); }
+
+/* One placement, plus the taking of ground over the top of it if the move came
+   to anything. A Deus replaces the placing sound rather than joining it, since
+   both at once on the same square reads as two moves. */
+function moveSound(r, asDeus){
+  if(replay) return;
+  sfx(asDeus?'deus':'place');
+  if(r && (r.claimed.length || r.killed.length)) sfx('claim');
 }
 
 /* The lift is set on the board and inherited by every sprite, so nothing needs
