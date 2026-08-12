@@ -233,6 +233,8 @@
   .rules{font-size:12.5px; color:#c9c4bc}
   .rules ol{padding-left:16px; margin:0}
   .rules li{margin-bottom:6px}
+  .rules p{margin:0 0 9px}
+  .rules p:last-child{margin-bottom:0}
   .rules b{color:var(--ink)}
   .note{font-size:11.5px; color:var(--dim); margin-top:8px; line-height:1.6}
 
@@ -432,7 +434,7 @@
     </div>
     <div class="panel deuspanel">
       <button class="deus" id="deusbtn">Play Deus</button>
-      <div class="note" id="deusnote">Deus counts as any rank and doubles all land joined to them.</div>
+      <div class="note" id="deusnote">A Deus can fill the role of any subject, and doubles the support of the kingdoms it joins.</div>
     </div>
   </div>
 
@@ -459,7 +461,7 @@
     </div>
 
     <div class="panel">
-      <h2>Rank <span class="turnrank" id="turnrank"></span></h2>
+      <h2>Subject <span class="turnrank" id="turnrank"></span></h2>
       <div class="cycle" id="cycle"></div>
     </div>
 
@@ -489,15 +491,26 @@
     </div>
 
     <div class="panel">
-      <h2>Rules</h2>
-      <div class="rules"><ol>
-        <li>Place one piece on any empty square. The turn sets the rank: <b>Laic, Baron, Duke</b>, repeating.</li>
-        <li>Pieces that touch form a <b>band</b>. The empty squares beside it are its <b>open ground</b>. Take the last one and the whole band is <b>extinguished</b>, and its squares become your <b>claimed land</b> at <b>one point</b> each. A band down to one square of open ground cannot be saved.</li>
-        <li><b>Surround</b> up to <b>four</b> empty squares with your own pieces. Map edges count as wall. With <b>all three ranks</b> standing around it, you found a <b>town</b> worth <b>two points</b> a square.</li>
-        <li><b>Deus</b> replaces the turn rank. They count as any rank and double all land joined to them. They are extinguished like anyone, and they must be sent out <b>before your last <span id="deadlinen">10</span> pieces</b>.</li>
-        <li>Pieces are limited. When both sides run out, the larger holding wins.</li>
-      </ol></div>
-      <div class="note">Claim the land a Deus lands on and they will be extinguished.</div>
+      <h2>Instructions</h2>
+      <!-- The count of pieces is still read from the board in play, so an eleven
+           by eleven game quotes its own number rather than the nine by nine one. -->
+      <div class="rules">
+        <p>You are a ruler sending your subjects to expand your borders. Your
+          subjects are the <b>Poet</b>, the <b>Merchant</b>, and the <b>Clergy</b>.
+          All three are needed to attract commoners to support a kingdom. Each turn
+          you place a different subject, and if all are present as they surround an
+          empty plot of land it will become another piece of your kingdom.</p>
+        <p>Subjects can be sent to destroy and conquer enemy kingdoms by surrounding
+          them, but you will gain less supportive commoners in the aftermath. War is
+          an unpopular policy.</p>
+        <p>A <b>Deus</b> falls from the heavens and inspires all the lands it
+          touches, doubling the support of its connected kingdoms. It must be played
+          before the winter months. (Your last <span id="deadlinen">10</span>
+          pieces)</p>
+        <p>When all subjects have been sent to work, or there are no more moves to
+          be made, the ruler with the most support wins.</p>
+      </div>
+      <div class="note">Conquering an enemy Deus extinguishes its inspiration.</div>
     </div>
 
     <div class="panel">
@@ -513,10 +526,10 @@
         <option value="2">Ivy (Locked in)</option>
       </select></label>
       <label><input type="checkbox" id="music" checked> Music</label>
-      <label><input type="checkbox" id="preview" checked> Show the land a piece would claim</label>
-      <div class="subnote">Hover a square to see what it would take. Pale means land claimed. Red means pieces extinguished.</div>
-      <label><input type="checkbox" id="danger" checked> Show piece danger</label>
-      <div class="subnote">Amber marks a band down to two squares of open ground. Red marks one.</div>
+      <label><input type="checkbox" id="preview" checked> Show the kingdoms a subject would claim</label>
+      <div class="subnote">Pale means a kingdom formed, red means one conquered.</div>
+      <label><input type="checkbox" id="danger" checked> Show subjects in danger</label>
+      <div class="subnote">Amber marks subjects with two open plots left. Red marks one.</div>
       <div id="liftrow" hidden>
         <label>Raise
           <input type="range" id="lift" min="0" max="40" step="1" value="0">
@@ -1091,13 +1104,16 @@ function pickGentle(g){
 
 /* ================================ art ================================ */
 /* Every sprite is drawn at a whole number multiple of its own pixels. A shared
-   multiplier keeps a Laic and a Baron at the same pixel size even though their
+   multiplier keeps a Poet and a Merchant at the same pixel size even though their
    files differ, and whole numbers are what keep the upscale free of blur. */
-const RANKNAME=['Laic','Baron','Duke','Deus'];
+/* What a subject is called on screen, kept apart from what its picture is filed
+   under. The art was drawn before the renaming, so the two lists differ on
+   purpose and renaming a subject again means touching only the first. */
+const RANKNAME=['Poet','Merchant','Clergy','Deus'];
 const SPRITE=[
-  {file:'Laic',  w:29, h:35},
-  {file:'Baron', w:42, h:38},
-  {file:'Duke',  w:34, h:37},
+  {file:'Laic',  w:29, h:35},   // Poet
+  {file:'Baron', w:42, h:38},   // Merchant
+  {file:'Duke',  w:34, h:37},   // Clergy
   {file:'Deus',  w:42, h:38}
 ];
 const SPRITE_BOX = {w:42, h:38};          // the largest rank, used to set the shared multiplier
@@ -1424,9 +1440,11 @@ function drawCycle(){
   }
 }
 
-/* The toggle governs whether the land a piece would claim is shown. What a
-   piece would extinguish is always shown, since that is a consequence of the
-   move rather than a reading of the position. */
+/* The toggle governs the whole preview, both colours. What a subject would
+   conquer used to show regardless, on the reasoning that it follows from the move
+   rather than being a reading of the position. Turning the setting off and still
+   seeing red reads as the setting being broken, which is worse than the
+   distinction was worth. */
 /* Which square the pointer is over, remembered rather than left to the marks on
    the board. Every render builds each square's classes again from nothing, which
    wiped a preview that was already showing. The pointer had not moved, so no
@@ -1439,9 +1457,9 @@ function paintPreview(i){
   if(busy||replay||game.over()||!humanTurn()) return;
   if(i<0||i>=cells.length) return;
   if(game.kind[i]!==EMPTY||!game.legal(i)) return;
+  if(!document.getElementById('preview').checked) return;   // nothing to work out
   const {claimed,killed}=game.peek(i,deusMode&&game.canDeus(seat()));
-  if(document.getElementById('preview').checked)
-    for(const j of claimed) cells[j].classList.add('take');
+  for(const j of claimed) cells[j].classList.add('take');
   for(const j of killed) cells[j].classList.add('die');
 }
 function onHover(i){ hoverAt=i; clearMarks(); paintPreview(i); }
