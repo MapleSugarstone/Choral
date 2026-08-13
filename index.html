@@ -344,11 +344,21 @@
   .lobbyflag[hidden]{display:none}
   .waiting{text-align:center; color:var(--gold); font-weight:700}
   /* All three dots are always in the layout and only their opacity changes, so
-     the line keeps one width and the centred words never shift as they arrive. */
-  .dots i{font-style:normal; opacity:0; animation:dot 1.5s infinite}
-  .dots i:nth-child(2){animation-delay:.25s}
-  .dots i:nth-child(3){animation-delay:.5s}
-  @keyframes dot{0%{opacity:0} 12%{opacity:1} 72%{opacity:1} 84%{opacity:0} 100%{opacity:0}}
+     the line keeps one width and the centred words never shift as they arrive.
+
+     Each dot has its own turn to appear rather than one keyframe with delays,
+     because delays drift out of step at the loop and leave gaps in the middle.
+     The step timing is what makes it read as a loading ellipsis: a dot is either
+     there or it is not, and anything that eases between the two looks like
+     breathing rather than counting. */
+  .dots i{font-style:normal; opacity:0; animation-duration:1.2s;
+          animation-timing-function:steps(1,end); animation-iteration-count:infinite}
+  .dots i:nth-child(1){animation-name:dot1}
+  .dots i:nth-child(2){animation-name:dot2}
+  .dots i:nth-child(3){animation-name:dot3}
+  @keyframes dot1{0%{opacity:0} 25%{opacity:1} 100%{opacity:1}}
+  @keyframes dot2{0%{opacity:0} 50%{opacity:1} 100%{opacity:1}}
+  @keyframes dot3{0%{opacity:0} 75%{opacity:1} 100%{opacity:1}}
   .lobbycode{font-size:27px; letter-spacing:.2em; font-weight:700; color:var(--gold);
              text-align:center; padding:10px 0 4px; font-variant-numeric:tabular-nums;
              word-break:break-all}
