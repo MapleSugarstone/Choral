@@ -2641,24 +2641,32 @@ for(const f of ['ivy_pro.js','nets/opponents.js','nets/fixture.js','neural.js'])
     sel.appendChild(o);
   }
 
-  const grp = document.createElement('optgroup');
-  grp.label = 'Trained in the league';
-  {
-    /* the strongest loaded network opens, the deep read finishes */
-    const o = document.createElement('option');
-    o.value = 'hyb:' + nets[0].name;
-    o.textContent = nets[0].name + ' opening, deep-read endgame — slowest';
-    grp.appendChild(o);
+  /* The lab list: LOCAL exports only, never the shipped brain.  ivy_pro.js
+     marks its net `pro`, and showing that one here with its name and rating
+     would undo the "Secretly" on the live site - which it did, once.  Online
+     the nets/ folder does not exist, so this whole group simply never
+     appears. */
+  const lab = nets.filter(n => !n.pro);
+  if(lab.length){
+    const grp = document.createElement('optgroup');
+    grp.label = 'Trained in the league';
+    {
+      /* the strongest loaded network opens, the deep read finishes */
+      const o = document.createElement('option');
+      o.value = 'hyb:' + nets[0].name;
+      o.textContent = nets[0].name + ' opening, deep-read endgame — slowest';
+      grp.appendChild(o);
+    }
+    for(const n of lab){
+      const o = document.createElement('option');
+      o.value = 'net:' + n.name;
+      const cr = n.rating ? '  ~' + n.rating : '';
+      const style = n.style && n.styleText ? '  (' + n.styleText + ')' : '';
+      o.textContent = n.name + cr + style;
+      grp.appendChild(o);
+    }
+    sel.appendChild(grp);
   }
-  for(const n of nets){
-    const o = document.createElement('option');
-    o.value = 'net:' + n.name;
-    const cr = n.rating ? '  ~' + n.rating : '';
-    const style = n.style && n.styleText ? '  (' + n.styleText + ')' : '';
-    o.textContent = n.name + cr + style;
-    grp.appendChild(o);
-  }
-  sel.appendChild(grp);
 })();
 </script>
 </body>

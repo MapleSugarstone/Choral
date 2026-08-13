@@ -447,7 +447,7 @@
     const out = [];
     for (const k in (global.CHORAL_NETS || {})) {
       const d = global.CHORAL_NETS[k];
-      out.push({ name: k, rating: d.rating, style: d.style, note: d.note, role: d.role });
+      out.push({ name: k, rating: d.rating, style: d.style, note: d.note, role: d.role, pro: !!d.pro });
     }
     out.sort((a, b) => (b.rating || 0) - (a.rating || 0));
     return out;
