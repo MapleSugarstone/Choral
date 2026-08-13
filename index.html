@@ -1859,6 +1859,26 @@ function finish(){
    rather than stored, so a file stays small and cannot disagree with the rules. */
 const CHRONICLE_VERSION = 1;
 
+/* Saving by link, for a browser with somewhere to put files.
+
+   The blob is kept alive well past the click. Revoking it in the same tick was
+   the bug that lost the file on a phone: the click only asks for a download, the
+   fetch happens after, and pulling the blob out from under it left nothing to
+   save. A desktop browser is usually quick enough to have taken it already,
+   which is why this only ever showed up on a phone.
+
+   The type is deliberately not application/json. Where the download attribute is
+   not honoured, and Safari is the one that does not honour it, the browser
+   navigates to the blob instead. Given json it renders it in the tab. Given a
+   type it cannot display, it offers to save it. */
+function saveByLink(text, name){
+  const url=URL.createObjectURL(new Blob([text],{type:'application/octet-stream'}));
+  const a=document.createElement('a');
+  a.href=url; a.download=name; a.rel='noopener';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 60000);
+}
+
 function exportChronicle(){
   if(!logEntries.length){ say('There is nothing to export yet.'); return; }
   const data={
@@ -1866,11 +1886,26 @@ function exportChronicle(){
     board:cfg.n, budget:game.budget, played:new Date().toISOString(),
     moves:logEntries.map(e=>({c:e.cell, d:e.deus?1:0}))
   };
+  const text=JSON.stringify(data);
   const name=`choral-${cfg.n}x${cfg.n}-${data.played.slice(0,19).replace(/[:T]/g,'-')}.json`;
-  const url=URL.createObjectURL(new Blob([JSON.stringify(data)],{type:'application/json'}));
-  const a=document.createElement('a');
-  a.href=url; a.download=name; document.body.appendChild(a); a.click();
-  a.remove(); URL.revokeObjectURL(url);
+
+  /* A phone has a share sheet rather than a downloads folder, and Save to Files
+     is what somebody on one actually wants. Offered only when the browser says
+     it can carry this file, and share has to be called inside the press that
+     asked for it, which it is. Backing out of the sheet is an answer, so it is
+     not treated as a failure to fall back from. */
+  let file=null;
+  try{ file=new File([text], name, {type:'application/json'}); }catch(err){}
+  if(file && navigator.canShare && navigator.canShare({files:[file]})){
+    navigator.share({files:[file], title:name})
+      .then(()=>say(`Chronicle sent as ${name}.`))
+      .catch(err=>{
+        if(err && err.name==='AbortError') return;
+        saveByLink(text,name); say(`Chronicle saved as ${name}.`);
+      });
+    return;
+  }
+  saveByLink(text,name);
   say(`Chronicle saved as ${name}.`);
 }
 
