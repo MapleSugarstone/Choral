@@ -1019,6 +1019,7 @@ function priorOf(s,a){
 }
 
 function uct(g,ms){
+  uct.lastKids=[];        // an early return must not leave a previous root's candidates behind
   const mv=g.moves();
   if(!mv.length||!g.canPlay(g.toMove())) return -1;
   const me=g.toMove(), cand=candidates(g,mv), cc=g.cfg.cc;
@@ -1085,6 +1086,10 @@ function uct(g,ms){
     }
   }
   uct.lastSims=sims;
+  /* The root's candidates with their visit counts and win tallies, for the
+     tier that reads one turn further.  Captured here because only the search
+     knows them; costs nothing when nobody looks. */
+  uct.lastKids=root.kids.map(k=>({cell:k.act.cell,deus:!!k.act.deus,n:k.n,w:k.w}));
   let best=null;
   for(const k of root.kids) if(!best||k.n>best.n) best=k;
   if(!best) return cand[0];
@@ -1095,6 +1100,76 @@ function uct(g,ms){
    150 on 11 by 11, which is where a camped Deus is strongest. */
 const thinkMs = cc => Math.min(2400, Math.round(1150 * Math.pow(cc/81, 1.6)));
 const pickSharp = g => uct(g, thinkMs(g.cfg.cc));
+
+/* Locked in, reading the reply: the same brain, made to hear the answer before
+   it commits.  A full Locked-in search ranks the root; each finalist is played
+   onto the board, THE SAME SEARCH chooses the opponent's reply, and the line is
+   judged after that answer - by a shorter verdict search at depth 1, or by
+   reading a further full exchange at depth 2.
+
+   This is not deeper MCTS - the tree already reads past one exchange.  What it
+   fixes is the tree's thinness at the root: a tempting move whose refutation
+   sits one ply down can win the visit count before the refutation is found.
+   Forcing every finalist through a dedicated reply search makes that
+   refutation the judge rather than a leaf the tree may never have widened
+   into.  Depth 1 costs about 2.6x the Locked-in clock; depth 2 about 3.7x,
+   which is why the hybrid below only spends it on the endgame. */
+function deepPick(g,T,depth,K){
+  const first=uct(g,T), me=g.toMove();
+  const kids=(uct.lastKids||[]).slice().sort((a,b)=>b.n-a.n).slice(0,K);
+  if(kids.length<2) return first;
+  let best=null,bv=-Infinity;
+  for(const k of kids){
+    const t=g.clone(); t.play(k.cell,k.deus);
+    const v=lineValue(t,me,T,depth);
+    if(v>bv){bv=v;best=k;}
+  }
+  return best.deus?{cell:best.cell,deus:true}:best.cell;
+}
+/* The worth, to `me`, of a position where the opponent is about to answer.
+   Every value is from me's frame: decided games count 10 plus the final
+   margin so a certain result outranks any estimate, and estimates are the
+   verdict search's own win rate with banked points as the tiebreak. */
+function lineValue(t,me,T,depth){
+  const margin=()=>t.score[me-1]-t.score[2-me];
+  if(t.over()) return 10+margin();
+  const reply=uct(t,T*0.25);
+  if(reply===-1) t.play(-1);
+  else{ const rc=typeof reply==='object'?reply.cell:reply;
+        t.play(rc, typeof reply==='object'&&!!reply.deus); }
+  if(t.over()) return (margin()>0?10:-10)+margin();
+  if(depth<=1){
+    uct(t,T*0.15);                               // our next look, for its verdict
+    let w=0.5,bn=0;
+    for(const q of uct.lastKids||[]) if(q.n>bn){bn=q.n;w=q.w/q.n;}
+    return w+margin()*0.01;
+  }
+  /* another exchange: our best continuations, each judged one level shallower
+     on a shrunken clock so the tree of searches stays affordable */
+  const T2=T*0.3;
+  uct(t,T2);
+  const kids=(uct.lastKids||[]).slice().sort((a,b)=>b.n-a.n).slice(0,2);
+  if(!kids.length) return 0.5+margin()*0.01;
+  let bv=-Infinity;
+  for(const k of kids){
+    const u=t.clone(); u.play(k.cell,k.deus);
+    const v=lineValue(u,me,T2,depth-1);
+    if(v>bv)bv=v;
+  }
+  return bv;
+}
+
+/* The chimera: the strongest trained network's judgment while pieces are
+   plentiful, and exact reading when they are not.  Down to the final ten
+   pieces every move is a commitment - seals, rescues, the Deus window closing
+   - and that is where a network's intuition is weakest and a deep concrete
+   read is strongest, so the hand-off point is the same one the rules
+   themselves mark as the start of the end.  If no network is exported the
+   opening falls back to Locked in, and the endgame read still applies. */
+function pickHybrid(g,name){
+  if(g.left(g.toMove())>10 && window.pickNeural) return window.pickNeural(g,name);
+  return deepPick(g, thinkMs(g.cfg.cc), 2, 3);
+}
 function pickGentle(g){
   const mv=g.moves(); if(!mv.length) return -1;
   if(Math.random()<0.45){ const b=bestGrab(g,mv); if(b.move>=0) return b.move; }
@@ -1596,12 +1671,15 @@ function advance(){
     if(myGen!==gen) return;                 // the board moved on while she was thinking
     const her=IVY();
     if(!game.canPlay(her)||!game.moves().length){ game.play(-1); logMove(her,-1); say('Ivy passes.'); advance(); return; }
-    /* Ivy's three tiers are values 0, 1 and 2 and are what the game opens on.
-       Anything else is a trained network from sim/league, added as an extra
-       opponent; if one fails to load the game falls back to Sharp rather than
-       stalling on a turn. */
+    /* Ivy's settings: 0-2 are her original hand-built tiers and what the game
+       opens on; 3 is Secretly Pro, the strongest network the league has
+       trained, shipped in ivy_pro.js and offered only when it loaded.  The
+       optgroup entries below her are lab exports.  Anything that fails to
+       load falls back to Sharp rather than stalling on a turn. */
     const d=document.getElementById('diff').value;
     const act = d==='0'?pickGentle(game) : d==='1'?pickSteady(game) : d==='2'?pickSharp(game)
+              : d==='3'?(window.pickIvyPro?window.pickIvyPro(game):pickSharp(game))
+              : d.slice(0,4)==='hyb:'?pickHybrid(game,d.slice(4))
               : (window.pickNeural?window.pickNeural(game,d.slice(4)):pickSharp(game));
     let cell=act, deus=false;
     if(act && typeof act==='object'){ cell=act.cell; deus=!!act.deus; }
@@ -2487,26 +2565,31 @@ preload();
 build(9);
 </script>
 
-<!-- Trained opponents, added alongside Ivy rather than replacing her.  All three
-     files are optional: if none have been exported yet they 404 harmlessly and
-     the menu is exactly as it was.
+<!-- Trained opponents, added alongside Ivy rather than replacing her.
 
-     Held back for now, so Ivy offers her own three settings and nothing else.
-     The block below already stands down when ChoralNeural is missing, and the
-     turn that picks a move already falls back to Sharp, so uncommenting these
-     three lines is the whole of putting the trained opponents back.  They are
-     also about a megabyte and a half between them, which is not weight a menu
-     nobody can reach should cost every visitor.
+     LOCAL TESTING ONLY.  nets/ is gitignored and never leaves this machine:
+     `Fief.exe league export` writes it, and on any deploy without the folder
+     these first two tags 404 harmlessly, the menu block below finds no
+     networks and stands down, and the page is Ivy's three settings exactly as
+     shipped.  Presence of the folder IS the switch - nothing else to flip.
 
-     The networks are not good enough to ship yet: the best of them sits above
-     greedy play and the defended camp, but below a Deus hunter and well below
-     every setting of the brain Ivy already uses.  Worth revisiting once the
-     league has something that can take a game off Locked in. -->
-<!--
-<script src="nets/opponents.js"></script>
-<script src="nets/fixture.js"></script>
-<script src="neural.js"></script>
--->
+     To refresh the local opponent after more training:
+         cd sim && ./bin/tools/Fief.exe league export --count 1
+     then hard-reload.  choralNetSelfTest() in the console must say ok:true;
+     it checks this page's engine against reference outputs the simulator
+     wrote beside the weights. -->
+<script>
+/* Written with a time stamp so a re-export is picked up by a plain reload -
+   these files change every time the league trains, and a browser's heuristic
+   cache happily serves yesterday's champion otherwise.
+
+   ivy_pro.js is the SHIPPED brain - Secretly Pro - committed to the repo and
+   refreshed deliberately with `league export --pro`.  The nets/ folder is the
+   lab: gitignored, regenerated by every plain export, absent online, where its
+   two entries 404 exactly as static tags would. */
+for(const f of ['ivy_pro.js','nets/opponents.js','nets/fixture.js','neural.js'])
+  document.write('<scr'+'ipt src="'+f+'?v='+Date.now()+'"></scr'+'ipt>');
+</script>
 <script>
 (function(){
   // nothing to add to the menu when the files above are not loaded
@@ -2539,8 +2622,30 @@ build(9);
   };
 
   const sel = document.getElementById('diff');
+
+  /* Secretly Pro: the strongest loaded network, seated among Ivy's own
+     settings as her fourth difficulty rather than in the lab list below.  No
+     rating on the label - she is being modest.  The option only exists when a
+     network actually loaded, so the menu never offers a brain it cannot
+     summon, and the picker falls back to Sharp even then. */
+  const strongest = nets[0].name;
+  window.pickIvyPro = g => window.pickNeural(g, strongest);
+  {
+    const o = document.createElement('option');
+    o.value = '3';
+    o.textContent = 'Ivy (Secretly Pro)';
+    sel.appendChild(o);
+  }
+
   const grp = document.createElement('optgroup');
   grp.label = 'Trained in the league';
+  {
+    /* the strongest loaded network opens, the deep read finishes */
+    const o = document.createElement('option');
+    o.value = 'hyb:' + nets[0].name;
+    o.textContent = nets[0].name + ' opening, deep-read endgame — slowest';
+    grp.appendChild(o);
+  }
   for(const n of nets){
     const o = document.createElement('option');
     o.value = 'net:' + n.name;
