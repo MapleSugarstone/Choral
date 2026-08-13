@@ -194,7 +194,6 @@
                     background:rgba(244,238,220,.30)}
   .cell.die::after{content:''; position:absolute; inset:0; pointer-events:none;
                    background:rgba(192,80,56,.42)}
-  .cell.lastmv{outline:var(--line) solid var(--gold); outline-offset:calc(-1 * var(--line))}
   /* Open ground, drawn on the board. Extinguishing is where most of the land
      comes from and it is the one thing you cannot read at a glance, so a band
      down to two squares of open ground is marked amber and one is marked red,
@@ -1507,50 +1506,34 @@ function render(){
       im.className='claim'; im.style.display='block';
     }
     if(legal && legal.has(i)){ c.classList.add('playable'); if(deusMode) c.classList.add('deusmode'); }
-    if(i===game.last) c.classList.add('lastmv');
   }
-  // Mark every band short of open ground, for both sides, since it is open
-  // information either way and counting it by eye is the hard part.
-  /* Counting open ground is not enough on its own. Extinguishing a band turns its
-     squares into land rather than back into open ground, so the piece that does
-     the extinguishing gains no room to breathe from it. A square that would take
-     a band's last ground is therefore often suicide, and refused. A band can sit
-     on one square of open ground that nobody is able to play, which is not
-     danger at all, and marking it red said the opposite of the truth.
+  /* Mark every band the other side can still take, for both colours, since it is
+     open information either way and counting it by eye is the hard part.
 
-     So the mark asks whether the other side could actually play the ground,
-     rather than only how much of it is left. */
+     Counting open ground is not enough to decide this, and no amount of counting
+     is. Extinguishing a band turns its squares into land rather than back into
+     open ground, so the piece that does the extinguishing gains nothing to
+     breathe from. A square that would take a band's last ground is often suicide,
+     and refused. That makes a single eye enough to hold a band here where Go
+     would want two, and it makes two squares in a row enough as well: fill one
+     and the other stops being playable. There is also nothing to fear from a
+     player who has spent every piece they own.
+
+     Rather than test for each of those shapes, the mark plays the position out.
+     Only bands already down to one or two squares are asked about, so the search
+     is a couple of moves wide and ends immediately. */
   if(document.getElementById('danger').checked){
     const S=scratch(cfg.cc), ver=++S.vAud;
     for(let i=0;i<cfg.cc;i++){
       if(game.kind[i]!==PIECE || S.aud[i]===ver) continue;
       const r=game.groupLibs(i,S.grp);
-      // Copied out, because legal() below floods through this same buffer.
-      const band=S.grp.slice(0,r.n);
+      // Copied out, because the search below floods through this same buffer.
+      const band=[...S.grp.slice(0,r.n)];
       for(const j of band) S.aud[j]=ver;
       if(r.libs>2) continue;
-      const foe=3-game.own[i];
-      const ground=new Set();
-      for(const j of band)
-        for(const m of cfg.nbr[j]) if(game.kind[m]===EMPTY) ground.add(m);
-      /* Taking a band means filling every last square of its ground, so one
-         square the enemy can never play holds the whole thing. An eye is the
-         usual case: ringed by the band itself, the piece that took it would
-         extinguish the band, be left standing on land rather than open ground,
-         and so is refused. One eye is enough here, where Go would want two,
-         because extinguishing gives no room back.
-
-         Never is the right word. A square illegal for them now has no empty
-         neighbour, or the move would already stand. So no new piece can ever
-         appear beside it, and the bands that do touch it only lose ground from
-         here. Nothing about it can improve for them.
-
-         The owner can still spoil it by filling their own eye, which is their
-         business, and the next redraw marks the band then. */
-      let shut=0;
-      for(const g of ground) if(!game.legal(g,foe)) shut++;
-      if(shut) continue;
-      const mark=r.libs===1?'doomed':'shaky';
+      const took=movesToTake(game, band, 3-game.own[i], r.libs);
+      if(took<0) continue;                   // they cannot take it, so it stands
+      const mark=took===1?'doomed':'shaky';
       for(const j of band) cells[j].classList.add(mark);
     }
   }
@@ -1616,6 +1599,36 @@ function render(){
 /* Built once and given to both places it appears. The sidebar shows one and the
    folded layout shows the other, never both, but drawing them from a single
    pass means they cannot fall out of step with each other. */
+/* The fewest moves the other side needs to extinguish this band, or -1 if they
+   cannot do it at all. The defender is given no reply, so this is the worst the
+   position holds rather than a reading of the game.
+
+   Played out rather than reasoned about, because every rule that decides it is
+   already in play() and legal(). Filling one square of open ground removes
+   exactly one, so a band on N squares takes N moves and the search never needs
+   to look deeper than that. Both orders are tried, since filling one square can
+   be what makes the other unplayable, and then the other order is the one that
+   works. Their piece count is spent as they go, so a side with nothing left to
+   place threatens nothing. */
+function movesToTake(g, band, foe, depth){
+  if(depth<=0 || !g.canPlay(foe)) return -1;
+  const libs=[];
+  for(const j of band)
+    for(const m of g.cfg.nbr[j])
+      if(g.kind[m]===EMPTY && libs.indexOf(m)<0) libs.push(m);
+  let best=-1;
+  for(const x of libs){
+    const c=g.clone();
+    if(c.toMove()!==foe) c.ply++;            // hand them the turn, rank carries on
+    if(!c.legal(x)) continue;
+    c.play(x,false);
+    if(band.some(j=>c.kind[j]!==PIECE)) return 1;      // gone on this move
+    const after=movesToTake(c, band, foe, depth-1);
+    if(after>0 && (best<0 || after+1<best)) best=after+1;
+  }
+  return best;
+}
+
 function drawCycle(){
   let html='';
   for(let t=0;t<4;t++){
