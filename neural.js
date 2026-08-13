@@ -74,6 +74,8 @@
     this.logits = new Float32Array(2 * this.G.cells + 1);
     this._seen = new Int32Array(this.G.cells);
     this._grp = new Int32Array(this.G.cells);
+    this._eyeArr = new Int8Array(this.G.cells);
+    this._eyeSeen = new Int32Array(this.G.cells);
   };
 
   /* ------------------------------------------------------------- primitives */
@@ -241,18 +243,48 @@
       }
     }
 
-    // liberty buckets, one flood per band.  The two scratch arrays are owned by
-    // the net rather than allocated here: this runs once per tree node, and a
-    // pair of fresh typed arrays per evaluation is real time at a few hundred
-    // evaluations a move.
-    const seen = this._seen, grp = this._grp;
-    seen.fill(0);
+    /* Eyes and settled-alive bands, planes 40-43, mirroring Enc.Fill: an eye
+       is an empty square whose every neighbour belongs to one side (piece or
+       land), and a band adjacent to two of its own is uncapturable - filling
+       either eye while the other stands is the suicide the rules forbid.
+       Computed exactly, because this is combinatorics, not judgment. */
+    const eye = this._eyeArr;
+    eye.fill(0);
+    for (let i = 0; i < cells; i++) {
+      if (g.kind[i] !== EMPTY) continue;
+      let owner = 0;
+      const nb = g.cfg.nbr[i];
+      for (let t = 0; t < nb.length; t++) {
+        const m = nb[t];
+        if (g.kind[m] === EMPTY) { owner = 0; break; }
+        if (owner === 0) owner = g.own[m];
+        else if (owner !== g.own[m]) { owner = 0; break; }
+      }
+      if (owner !== 0) { eye[i] = owner; set(owner === me ? 40 : 41, i, 1); }
+    }
+
+    // liberty buckets, one flood per band.  The scratch arrays are owned by
+    // the net rather than allocated here: this runs once per tree node, and
+    // fresh typed arrays per evaluation are real time at a few hundred
+    // evaluations a move.  The same flood counts each band's eyes.
+    const seen = this._seen, grp = this._grp, eyeSeen = this._eyeSeen;
+    seen.fill(0); eyeSeen.fill(0);
+    let eyeVer = 0;
     for (let i = 0; i < cells; i++) {
       if (g.kind[i] !== PIECE || seen[i]) continue;
       const r = g.groupLibs(i, grp);
       const bucket = r.libs <= 1 ? 0 : (r.libs === 2 ? 1 : 2);
       const plane = (g.own[i] === me ? 15 : 18) + bucket;
       for (let q = 0; q < r.n; q++) { seen[grp[q]] = 1; set(plane, grp[q], 1); }
+      const side = g.own[i]; let eyes = 0; eyeVer++;
+      for (let q = 0; q < r.n; q++) {
+        const nb = g.cfg.nbr[grp[q]];
+        for (let t = 0; t < nb.length; t++) {
+          const m = nb[t];
+          if (eye[m] === side && eyeSeen[m] !== eyeVer) { eyeSeen[m] = eyeVer; eyes++; }
+        }
+      }
+      if (eyes >= 2) for (let q = 0; q < r.n; q++) set(side === me ? 42 : 43, grp[q], 1);
     }
 
     const mv = g.moves();

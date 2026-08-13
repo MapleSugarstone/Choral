@@ -222,6 +222,14 @@
   .sc .sub2{font-size:10px; color:var(--dim); margin-top:2px; min-height:13px}
   .sc.p1 .n{color:var(--red)} .sc.p2 .n{color:var(--white)}
 
+  /* Both of these belong to the folded layout and are not drawn otherwise. The
+     wide layout already carries the score and the queue in the sidebar, sitting
+     still beside the board. */
+  /* Two classes on purpose. The queue below the board carries .cycle as well, for
+     its look, and a lone .mobcycle would lose to the .cycle rule further down. */
+  .miniscore{display:none}
+  .cycle.mobcycle{display:none}
+
   .cycle{display:flex; gap:4px}
   /* min-width holds the four boxes to a quarter each. Without it a long name
      pushes its own box wider and the other three shrink around it, so the strip
@@ -354,8 +362,12 @@
 
   /* ---- narrow screens: Ivy hovers at the bottom left ---- */
   @media (max-width:900px){
-    .wrap{grid-template-columns:1fr;
+    /* minmax(0,...) rather than a bare 1fr, or the track refuses to shrink below
+       the widest thing in it and the whole page scrolls sideways. The wide layout
+       has always guarded its middle column this way. */
+    .wrap{grid-template-columns:minmax(0,1fr);
           grid-template-areas:"board" "deus" "side" "foot"}
+    .boardcol{min-width:0}
     .boardcol.stick{position:static}      /* folded layout scrolls as one piece */
     .askpanel{order:1} .deuspanel{order:0}
     .ivy{position:fixed; left:4px; bottom:-5vh; z-index:40; pointer-events:none; top:auto}
@@ -376,6 +388,50 @@
                color:var(--gold); background:none; border:0; padding:0;
                text-shadow:none; pointer-events:none}
     .ivy .mood:empty{display:none}
+
+    /* ---- what the folded layout adds ----
+       The sidebar carries the score and the queue, and folding drops both below
+       the board where reaching them means scrolling. Neither is worth scrolling
+       for mid turn, so each gets a second home the board keeps in view. The
+       originals stay exactly where they are. */
+    /* Centred rather than sat on a shared baseline. A dash is a short mark near
+       the middle of its own line, so lining its baseline up with digits three
+       times its size dropped it to their feet and it read as an underscore. */
+    /* Hung off the top edge of the board frame rather than sitting in the flow,
+       so it costs no height and the heading and the board keep the spacing they
+       had. It shares the subtitle's line, which has room to spare on the right.
+       Right aligned, matching the queue below the board. */
+    .miniscore{display:flex; align-items:center; gap:8px;
+               font-variant-numeric:tabular-nums;
+               position:absolute; right:0; bottom:100%; margin-bottom:5px}
+    .miniscore .msn{font-size:27px; font-weight:700; line-height:1}
+    .miniscore .p1{color:var(--red)}
+    .miniscore .p2{color:var(--white)}
+    .miniscore .msdash{color:var(--dim); font-size:22px; line-height:1}
+
+    /* Bare sprites here rather than the sidebar's boxed and labelled version. A
+       box three times the width of the art it holds is mostly empty, and the
+       names are already on the board in front of you. What is left to say is
+       which one goes down this turn, and a triangle under it says that.
+
+       Drawn in front of Ivy, since she stands fixed at the bottom left and is
+       about two hundred pixels wide. Her z-index is 40 and she takes no clicks,
+       so nothing is lost by passing over her. */
+    .cycle.mobcycle{display:flex; justify-content:flex-end; align-items:flex-end;
+                    gap:4px; margin-top:8px; position:relative; z-index:45}
+    /* Every slot the same size, set by the widest and tallest rank rather than by
+       whichever piece happens to be standing in it. The three ranks differ by up
+       to thirteen pixels, so sizing each slot to its own sprite made the whole
+       row jump sideways every time the queue advanced. The art stays centred and
+       sits on a common floor, so only the pieces change. */
+    .cycle.mobcycle .cyc{flex:0 0 auto; width:42px; height:48px; position:relative;
+                         background:none; border:0; padding:0 0 10px;
+                         display:flex; align-items:flex-end; justify-content:center}
+    .cycle.mobcycle .cyc .who{display:none}
+    .cycle.mobcycle .cyc.now::after{content:''; position:absolute; bottom:0;
+      left:50%; transform:translateX(-50%); width:0; height:0;
+      border-left:5px solid transparent; border-right:5px solid transparent;
+      border-bottom:6px solid var(--gold)}
   }
 </style>
 </head>
@@ -392,6 +448,15 @@
     <h1>Choral</h1>
     <div class="sub">A Denlish game of Strategy.</div>
     <div class="boardwrap">
+      <!-- The running score, shown only once the layout folds, where the sidebar
+           copy has scrolled out of reach. It lives inside the board frame so it
+           can be hung just above it without taking a line of its own, which would
+           push the heading and the board apart. -->
+      <div class="miniscore" id="miniscore">
+        <span class="msn p1" id="msRed">0</span>
+        <span class="msdash">&#8211;</span>
+        <span class="msn p2" id="msWhite">0</span>
+      </div>
       <div id="advicering" hidden></div>
       <div id="board"></div>
       <div id="over" hidden>
@@ -434,6 +499,10 @@
         </div>
       </div>
     </div>
+    <!-- The same queue the sidebar carries, sitting directly under the board for
+         the folded layout. Filled by the same pass, so the two cannot drift
+         apart. Hidden on a wide screen, where the sidebar shows it instead. -->
+    <div class="cycle mobcycle" id="mobcycle"></div>
     <div id="msg"></div>
   </div>
 
@@ -1473,6 +1542,11 @@ function render(){
   }
   document.getElementById('n1').textContent=game.score[0];
   document.getElementById('n2').textContent=game.score[1];
+  // The same two numbers beside the title, for the folded layout
+  const msR=document.getElementById('msRed'), msW=document.getElementById('msWhite');
+  if(msR && msW){
+    msR.textContent=game.score[0]; msW.textContent=game.score[1];
+  }
   for(const p of [1,2]){
     const bits=[`${game.left(p)} left`];
     if(game.deusCell[p-1]>=0) bits.push('Deus has landed');
@@ -1525,17 +1599,22 @@ function render(){
   paintPreview(hoverAt);
 }
 
+/* Built once and given to both places it appears. The sidebar shows one and the
+   folded layout shows the other, never both, but drawing them from a single
+   pass means they cannot fall out of step with each other. */
 function drawCycle(){
-  const el=document.getElementById('cycle'); el.innerHTML='';
+  let html='';
   for(let t=0;t<4;t++){
     const ply=game.ply+t, rank=ply%NRANK, who=1+(ply&1);
-    const d=document.createElement('div');
-    d.className='cyc'+(t===0?' now':'');
     const name = localPlay ? (who===1?'red':'white')
                : netPlay ? (who===mySeat()?'you':oppName())
                : (who===HUMAN?'you':'Ivy');
-    d.innerHTML=iconTag(rank,who,1)+`<div class="who">${t===0?'now':name}</div>`;
-    el.appendChild(d);
+    html+=`<div class="cyc${t===0?' now':''}">`+iconTag(rank,who,1)+
+          `<div class="who">${t===0?'now':name}</div></div>`;
+  }
+  for(const id of ['cycle','mobcycle']){
+    const el=document.getElementById(id);
+    if(el) el.innerHTML=html;
   }
 }
 
