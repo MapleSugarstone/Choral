@@ -2330,7 +2330,11 @@ document.getElementById('askHint').addEventListener('click',()=>{
   busy=true; ivySpeak('Let me look.'); render();
   // the search blocks, so hand the browser a frame to paint her thinking first
   setTimeout(()=>{
-    const act=uct(game, 700);
+    /* Her advice comes from the strongest brain she has: Secretly Pro when a
+       network is loaded, her own Locked-in search when not.  The net encodes
+       everything from the side to move, so asking it to play YOUR turn is the
+       same question it answers all game - there is no side to teach it. */
+    const act = window.pickIvyPro ? window.pickIvyPro(game) : uct(game, 700);
     let cell=act, deus=false;
     if(act && typeof act==='object'){ cell=act.cell; deus=!!act.deus; }
     busy=false;
