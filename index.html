@@ -1533,9 +1533,23 @@ function render(){
       const ground=new Set();
       for(const j of band)
         for(const m of cfg.nbr[j]) if(game.kind[m]===EMPTY) ground.add(m);
-      let open=0;
-      for(const g of ground) if(game.legal(g,foe)) open++;
-      if(!open) continue;                    // nobody can close on it, so it stands
+      /* Taking a band means filling every last square of its ground, so one
+         square the enemy can never play holds the whole thing. An eye is the
+         usual case: ringed by the band itself, the piece that took it would
+         extinguish the band, be left standing on land rather than open ground,
+         and so is refused. One eye is enough here, where Go would want two,
+         because extinguishing gives no room back.
+
+         Never is the right word. A square illegal for them now has no empty
+         neighbour, or the move would already stand. So no new piece can ever
+         appear beside it, and the bands that do touch it only lose ground from
+         here. Nothing about it can improve for them.
+
+         The owner can still spoil it by filling their own eye, which is their
+         business, and the next redraw marks the band then. */
+      let shut=0;
+      for(const g of ground) if(!game.legal(g,foe)) shut++;
+      if(shut) continue;
       const mark=r.libs===1?'doomed':'shaky';
       for(const j of band) cells[j].classList.add(mark);
     }
