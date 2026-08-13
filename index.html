@@ -285,6 +285,18 @@
   .row .pos{flex:1; font-size:11px; color:var(--dim); text-align:center;
             font-variant-numeric:tabular-nums}
   #replaybar{border-top:2px solid var(--line); margin-top:9px; padding-top:3px}
+  /* The code is meant to be selected, copied and pasted over, so it reads in a
+     fixed width face and opts back into selection like the chronicle does. */
+  #codebox{margin-top:8px}
+  #codebox[hidden]{display:none}
+  #codetext{width:100%; display:block; resize:vertical; min-height:62px;
+            font:12px/1.5 ui-monospace,"Cascadia Mono",Consolas,monospace;
+            background:#131118; color:var(--ink); border:2px solid var(--edge);
+            padding:7px 8px; border-radius:0;
+            -webkit-user-select:text; user-select:text}
+  #codetext:focus{outline:none; border-color:var(--gold)}
+  #codetext::placeholder{color:var(--dim)}
+  button#codebtn.on{border-color:var(--gold); color:var(--gold)}
 
   /* ---- playing someone far away ----
      The lobby takes the whole window rather than standing over the board. There
@@ -477,7 +489,16 @@
       <div class="row">
         <button id="export">Export</button>
         <button id="importbtn">Import</button>
+        <button id="codebtn">Code</button>
         <input type="file" id="importfile" accept=".json,application/json" hidden>
+      </div>
+      <div id="codebox" hidden>
+        <textarea id="codetext" rows="3" spellcheck="false" autocomplete="off"
+                  placeholder="Paste a replay code here"></textarea>
+        <div class="row">
+          <button id="codecopy">Copy</button>
+          <button id="codeload">Load</button>
+        </div>
       </div>
       <div id="replaybar" hidden>
         <div class="row">
@@ -1552,6 +1573,15 @@ function say(t){ msgEl.textContent=t; }
    clones a position thousands of times a move, and a history array would be
    copied on every one of those clones for no gain. */
 let logEntries=[], logShut=false;
+/* Set the moment somebody types in the code box. From then on the text is
+   theirs, and a move landing on the board must not overwrite what they were
+   halfway through pasting. Declared here because renderLog reads it. */
+let codeDirty=false;
+function refreshCode(){
+  const box=document.getElementById('codebox');
+  if(!box || box.hidden || codeDirty) return;
+  document.getElementById('codetext').value=writeCode();
+}
 function coord(i){
   const n=cfg.n, r=(i/n)|0, c=i%n;
   return String.fromCharCode(97+c)+(n-r);
@@ -1564,6 +1594,7 @@ function logMove(who,cell,deus,rank,r){
   renderLog();
 }
 function renderLog(){
+  refreshCode();                      // the code is another view of the same list
   const el=document.getElementById('log');
   if(!logEntries.length){ el.innerHTML='<div class="logempty">No moves yet.</div>'; return; }
   const cur=replay?replay.at:-1;
@@ -1750,6 +1781,75 @@ function exportChronicle(){
   say(`Chronicle saved as ${name}.`);
 }
 
+/* ---- replay codes ----------------------------------------------------------
+   The same game written as a line of text, the way a chess game is written out,
+   so it can be pasted into a message rather than sent as a file. The board size
+   leads, then every move in the order it was played. A Deus carries a star and a
+   pass is a dash.
+
+       C9 e5 d4 e4* f6 --
+
+   Nothing else is stored. The budget follows from the board size, and the
+   position follows from the moves, so a code cannot disagree with the rules. */
+function writeCode(){
+  const parts=logEntries.map(e => e.cell<0 ? '--' : coord(e.cell)+(e.deus?'*':''));
+  return ('C'+cfg.n+' '+parts.join(' ')).trim();
+}
+
+/* Text in, moves out, or null if it is not a code at all. Whitespace and commas
+   both separate, since a code pasted out of a chat may come back wrapped. */
+function readCode(text){
+  const bits=String(text||'').trim().split(/[\s,]+/).filter(Boolean);
+  if(!bits.length) return null;
+  const head=/^C(\d+)$/i.exec(bits[0]);
+  if(!head) return null;
+  const n=+head[1];
+  if(![7,9,11].includes(n)) return null;
+  const moves=[];
+  for(let k=1;k<bits.length;k++){
+    const t=bits[k].toLowerCase();
+    if(t==='--'||t==='-'){ moves.push({c:-1,d:false}); continue; }
+    const m=/^([a-k])(\d{1,2})(\*?)$/.exec(t);
+    if(!m) return null;
+    const col=m[1].charCodeAt(0)-97, row=n-(+m[2]);
+    if(col<0||col>=n||row<0||row>=n) return null;
+    moves.push({c:row*n+col, d:m[3]==='*'});
+  }
+  return {board:n, moves};
+}
+
+/* A code arrives as text somebody typed or edited, so the moves are played
+   through on a board of their own first. Without this a bad code would be
+   replayed square by square into a position that quietly stops making sense. */
+function checkMoves(n, budget, moves){
+  const g=new Game(makeCfg(n), budget||0);
+  for(let k=0;k<moves.length;k++){
+    const m=moves[k], no=k+1;
+    if(g.over()) return `move ${no} comes after the game ended`;
+    if(m.c<0){
+      if(g.canPlay(g.toMove()) && g.moves().length) return `move ${no} passes with squares still open`;
+    } else {
+      if(!g.canPlay(g.toMove())) return `move ${no} spends a piece that is gone`;
+      if(g.kind[m.c]!==EMPTY) return `move ${no} lands on a square already taken`;
+      if(m.d && !g.canDeus(g.toMove())) return `move ${no} sends a Deus out too late`;
+      if(!g.legal(m.c)) return `move ${no} is a square the rules do not allow`;
+    }
+    g.play(m.c, m.d);
+  }
+  return null;
+}
+
+// Shared by both ways in, so a file and a code land on the board the same way.
+function beginReplay(n, budget, moves){
+  gen++;                                    // stand down any turn still in flight
+  stopAuto(); hideOutcome();
+  document.getElementById('size').value=String(n);
+  buildCells(n);
+  replay={moves, at:0, budget:budget||0};
+  seekReplay(0);
+  sizeSprites();
+}
+
 function importChronicle(text){
   let data;
   try{ data=JSON.parse(text); }
@@ -1757,14 +1857,11 @@ function importChronicle(text){
   if(!data || !Array.isArray(data.moves) || !data.board){ say('That file is not a chronicle.'); return; }
   const n=+data.board;
   if(![7,9,11].includes(n)){ say('That chronicle uses a board this game does not have.'); return; }
-  gen++;                                    // stand down any turn still in flight
-  stopAuto(); hideOutcome();
-  document.getElementById('size').value=String(n);
-  buildCells(n);
-  replay={moves:data.moves.map(m=>({c:+m.c, d:!!m.d})), at:0, budget:+data.budget||0};
-  seekReplay(0);
-  sizeSprites();
-  say(`Chronicle loaded. ${replay.moves.length} moves. Step through with the arrows.`);
+  const moves=data.moves.map(m=>({c:+m.c, d:!!m.d}));
+  const wrong=checkMoves(n, +data.budget||0, moves);
+  if(wrong){ say(`That chronicle does not hold up: ${wrong}.`); return; }
+  beginReplay(n, +data.budget||0, moves);
+  say(`Chronicle loaded. ${moves.length} moves. Step through with the arrows.`);
 }
 
 /* Rebuilding from move one each step keeps a single source of truth. A game is
@@ -2542,6 +2639,34 @@ const LIFT_CONTROLS = false;
   slider.addEventListener('input',push);
   only.addEventListener('change',push);
 })();
+const codeText=document.getElementById('codetext'), codeBox=document.getElementById('codebox');
+codeText.addEventListener('input',()=>{ codeDirty=true; });
+document.getElementById('codebtn').addEventListener('click',()=>{
+  codeBox.hidden=!codeBox.hidden;
+  document.getElementById('codebtn').classList.toggle('on', !codeBox.hidden);
+  if(!codeBox.hidden){ codeDirty=false; codeText.value=writeCode(); }
+});
+document.getElementById('codecopy').addEventListener('click',async()=>{
+  codeDirty=false; codeText.value=writeCode();
+  if(!logEntries.length){ say('There are no moves to copy yet.'); return; }
+  try{
+    await navigator.clipboard.writeText(codeText.value);
+    say('Replay code copied.');
+  }catch(err){
+    // Refused outside a secure page, so leave it selected and say what to press.
+    codeText.focus(); codeText.select();
+    say('The code is selected. Press Ctrl and C to copy it.');
+  }
+});
+document.getElementById('codeload').addEventListener('click',()=>{
+  const parsed=readCode(codeText.value);
+  if(!parsed){ say('That is not a replay code.'); return; }
+  const wrong=checkMoves(parsed.board, 0, parsed.moves);
+  if(wrong){ say(`That code does not hold up: ${wrong}.`); return; }
+  beginReplay(parsed.board, 0, parsed.moves);
+  codeDirty=false;
+  say(`Code loaded. ${parsed.moves.length} moves. Step through with the arrows.`);
+});
 document.getElementById('export').addEventListener('click',exportChronicle);
 document.getElementById('importbtn').addEventListener('click',()=>document.getElementById('importfile').click());
 document.getElementById('importfile').addEventListener('change',ev=>{
