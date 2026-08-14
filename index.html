@@ -618,21 +618,23 @@
            by eleven game quotes its own number rather than the nine by nine one. -->
       <div class="rules">
         <p>You are a ruler sending your subjects to expand your borders. Your
-          subjects are the <b>Poet</b>, the <b>Merchant</b>, and the <b>Clergy</b>.
+          subjects are the <b>Poet</b>, the <b>Merchant</b>, and the <b>Bishop</b>.
           All three are needed to attract commoners to support a kingdom. Each turn
           you place a different subject, and if all are present as they surround an
-          empty plot of land it will become another piece of your kingdom.</p>
+          empty plot of land, it will become another piece of your kingdom (Only 4
+          squares at a time can be claimed this way).</p>
+        <p>Subjects connected orthogonally form the walls of a kingdom.</p>
         <p>Subjects can be sent to destroy and conquer enemy kingdoms by surrounding
-          them, but you will gain less supportive commoners in the aftermath. War is
-          an unpopular policy.</p>
+          their walls, but you will gain less supportive commoners in the aftermath.
+          War is an unpopular policy.</p>
+        <p>Walls can only be claimed when no open ground remains beside them.</p>
         <p>A <b>Deus</b> falls from the heavens and inspires all the lands it
           touches, doubling the support of its connected kingdoms. It must be played
           before the winter months. (Your last <span id="deadlinen">10</span>
-          pieces)</p>
-        <p>When all subjects have been sent to work, or there are no more moves to
-          be made, the ruler with the most support wins.</p>
+          pieces) Conquering an enemy Deus extinguishes its inspiration.</p>
+        <p>When all subjects have been sent to the board, or there are no more moves
+          to be made, the ruler with the most support wins.</p>
       </div>
-      <div class="note">Conquering an enemy Deus extinguishes its inspiration.</div>
     </div>
 
     <div class="panel">
@@ -1317,11 +1319,11 @@ function pickGentle(g){
 /* What a subject is called on screen, kept apart from what its picture is filed
    under. The art was drawn before the renaming, so the two lists differ on
    purpose and renaming a subject again means touching only the first. */
-const RANKNAME=['Poet','Merchant','Clergy','Deus'];
+const RANKNAME=['Poet','Merchant','Bishop','Deus'];
 const SPRITE=[
   {file:'Laic',  w:29, h:35},   // Poet
   {file:'Baron', w:42, h:38},   // Merchant
-  {file:'Duke',  w:34, h:37},   // Clergy
+  {file:'Duke',  w:34, h:37},   // Bishop
   {file:'Deus',  w:42, h:38}
 ];
 const SPRITE_BOX = {w:42, h:38};          // the largest rank, used to set the shared multiplier
