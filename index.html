@@ -1500,10 +1500,12 @@ let replay=null;                // {moves, at} while a chronicle is being watche
    position takes a number, and a turn that wakes to find the number changed
    stands down. */
 let gen=0;
-/* Ivy pulls a face when a turn goes badly for her: a swing of six points or
-   more to the player, or her Deus taken. It holds for a moment, then she goes
-   back to watching the board. */
-const SWING=6;
+/* Ivy pulls a face when a turn goes badly for her. What counts is the gap
+   between the two scores rather than either one alone, since a move that takes
+   ten from her and gives ten to you swings the game by twenty while raising
+   your own total by only half that. It holds for a moment, then she goes back
+   to watching the board. */
+const SWING=20;
 let ivyMood='idle', moodTimer=null;
 function setMood(mood, holdMs){
   ivyMood=mood;
@@ -1924,12 +1926,16 @@ function onClick(i){
   if(!game.canPlay(mover)||game.kind[i]!==EMPTY||!game.legal(i)) return;
   hushIvy();                       // her advice is spent once you play
   const asDeus=deusMode&&game.canDeus(mover), rank=game.curRank();
-  const mineBefore=game.score[mover-1];
+  const mineBefore=game.score[mover-1], hersBefore=game.score[IVY()-1];
   const r=game.play(i,asDeus);
   logMove(mover,i,asDeus,rank,r);
   moveSound(r, asDeus);
   if(!localPlay){
-    const swing=game.score[mover-1]-mineBefore;
+    // What the move did to the gap: what you gained plus what she lost.
+    const swing=(game.score[mover-1]-mineBefore) - (game.score[IVY()-1]-hersBefore);
+    // Her Deus counts whatever the scoreline says. One sitting on little land is
+    // worth few points at the moment it goes, and losing it is still the worst
+    // thing that can happen to her.
     const tookHerDeus=r.extinct.some(x=>x.side===IVY());
     if(swing>=SWING || tookHerDeus) setMood('owch', 2600);
   }
