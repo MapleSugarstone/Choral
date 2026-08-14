@@ -445,8 +445,12 @@
        Drawn in front of Ivy, since she stands fixed at the bottom left and is
        about two hundred pixels wide. Her z-index is 40 and she takes no clicks,
        so nothing is lost by passing over her. */
+    /* No stacking of its own. It used to sit at 45 to clear Ivy, which is not
+       needed: her artwork stops well short of the first slot, and being lifted
+       above her put the queue in front of what she says, since her caption lives
+       inside her fixed layer and cannot climb out of it. */
     .cycle.mobcycle{display:flex; justify-content:flex-end; align-items:flex-end;
-                    gap:4px; margin-top:8px; position:relative; z-index:45}
+                    gap:4px; margin-top:8px}
     /* Every slot the same size, set by the widest and tallest rank rather than by
        whichever piece happens to be standing in it. The three ranks differ by up
        to thirteen pixels, so sizing each slot to its own sprite made the whole
