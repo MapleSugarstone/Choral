@@ -376,11 +376,13 @@
   /* a note that belongs to the checkbox above it, lined up under its label */
   .subnote{margin:-3px 0 11px 23px; font-size:11px; line-height:1.55; color:var(--dim)}
   /* One row per side: the wheel, then the name that side is called. */
-  /* Folded away, since none of it matters until somebody goes looking. */
-  .advset{margin:0 0 11px}
-  .advset[open]{margin-bottom:13px}
-  .advset .subnote{margin:-4px 0 9px 0}
-  .advset label{margin-top:8px}
+  /* The silliness dials, shown only once she is allowed to be silly. A rule under
+     the group closes it off, so the settings below it do not read as more of the
+     same thing. */
+  #sillyrow{margin:-2px 0 11px 23px; padding-bottom:9px;
+            border-bottom:2px solid var(--edge)}
+  #sillyrow[hidden]{display:none}
+  #sillyrow .subnote{margin:-4px 0 9px 0}
 
   #inkrow{margin:-2px 0 11px 23px}
   #inkrow[hidden]{display:none}
@@ -660,21 +662,21 @@
         <option value="2">Ivy (Locked in)</option>
       </select></label>
       <div class="subnote" id="eloline" title="League rating, anchored so the pre-neural Locked in brain sits near 2000. A tilde marks an estimate; &plusmn; is measurement uncertainty."></div>
-      <details class="ask advset" id="advmenu">
-        <summary>Advanced</summary>
+      <label><input type="checkbox" id="sillyOn"> Enable Silliness</label>
+      <div id="sillyrow" hidden>
         <label>Silliness
-          <input type="range" id="sillyPct" min="0" max="100" step="1" value="0">
-          <span class="lifted" id="sillyPctVal">0%</span></label>
+          <input type="range" id="sillyPct" min="0" max="100" step="1" value="15">
+          <span class="lifted" id="sillyPctVal">15%</span></label>
         <div class="subnote">How often Ivy plays a random move.</div>
         <label>Max per match
-          <input type="range" id="sillyMax" min="0" max="30" step="1" value="30">
-          <span class="lifted" id="sillyMaxVal">30</span></label>
+          <input type="range" id="sillyMax" min="0" max="30" step="1" value="10">
+          <span class="lifted" id="sillyMaxVal">10</span></label>
         <div class="subnote">Maximum amounts of silly moves.</div>
         <label><input type="checkbox" id="sillyNoEnd" checked> Prevent silliness in the endgame</label>
         <div class="subnote">She has to lock in at the end.</div>
         <label><input type="checkbox" id="sillyNoDeus" checked> Prevent silly Deus placement</label>
         <div class="subnote">Stops her from being silly with the Deus.</div>
-      </details>
+      </div>
       <label><input type="checkbox" id="music" checked> Music</label>
       <label><input type="checkbox" id="sound" checked> Sound effects</label>
       <label><input type="checkbox" id="customcolors"> Enable custom colors</label>
@@ -1953,6 +1955,7 @@ function sillyPick(g){
   const cap=+document.getElementById('sillyMax').value;
   const noEnd=document.getElementById('sillyNoEnd').checked;
   const noDeus=document.getElementById('sillyNoDeus').checked;
+  if(!document.getElementById('sillyOn').checked) return null;
   if(pct<=0 || sillySoFar>=cap) return null;
   const her=g.toMove();
   // The last third of her pieces is the same stretch the Deus deadline marks, so
@@ -3262,7 +3265,7 @@ function saveSilly(){
       max:+document.getElementById('sillyMax').value,
       noEnd:document.getElementById('sillyNoEnd').checked,
       noDeus:document.getElementById('sillyNoDeus').checked,
-      open:document.getElementById('advmenu').open
+      on:document.getElementById('sillyOn').checked
     }));
   }catch(err){}                            // private browsing, or a full store
 }
@@ -3271,11 +3274,12 @@ function loadSilly(){
   try{ s=JSON.parse(localStorage.getItem(SILLY_STORE)||'null'); }catch(err){}
   if(!s) return;
   const held=(v,lo,hi,dflt)=>Number.isFinite(+v)?Math.max(lo,Math.min(hi,Math.round(+v))):dflt;
-  document.getElementById('sillyPct').value=held(s.pct,0,100,0);
-  document.getElementById('sillyMax').value=held(s.max,0,30,30);
+  document.getElementById('sillyPct').value=held(s.pct,0,100,15);
+  document.getElementById('sillyMax').value=held(s.max,0,30,10);
   if(typeof s.noEnd==='boolean') document.getElementById('sillyNoEnd').checked=s.noEnd;
   if(typeof s.noDeus==='boolean') document.getElementById('sillyNoDeus').checked=s.noDeus;
-  if(typeof s.open==='boolean') document.getElementById('advmenu').open=s.open;
+  if(typeof s.on==='boolean') document.getElementById('sillyOn').checked=s.on;
+  document.getElementById('sillyrow').hidden=!document.getElementById('sillyOn').checked;
   showSilly();
 }
 for(const id of ['sillyPct','sillyMax']){
@@ -3284,7 +3288,10 @@ for(const id of ['sillyPct','sillyMax']){
 }
 for(const id of ['sillyNoEnd','sillyNoDeus'])
   document.getElementById(id).addEventListener('change', saveSilly);
-document.getElementById('advmenu').addEventListener('toggle', saveSilly);
+document.getElementById('sillyOn').addEventListener('change',()=>{
+  document.getElementById('sillyrow').hidden=!document.getElementById('sillyOn').checked;
+  saveSilly();
+});
 showSilly();
 
 document.getElementById('export').addEventListener('click',exportChronicle);
