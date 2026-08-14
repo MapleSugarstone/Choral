@@ -376,6 +376,12 @@
   /* a note that belongs to the checkbox above it, lined up under its label */
   .subnote{margin:-3px 0 11px 23px; font-size:11px; line-height:1.55; color:var(--dim)}
   /* One row per side: the wheel, then the name that side is called. */
+  /* Folded away, since none of it matters until somebody goes looking. */
+  .advset{margin:0 0 11px}
+  .advset[open]{margin-bottom:13px}
+  .advset .subnote{margin:-4px 0 9px 0}
+  .advset label{margin-top:8px}
+
   #inkrow{margin:-2px 0 11px 23px}
   #inkrow[hidden]{display:none}
   .inkside{display:flex; align-items:center; gap:8px; margin-bottom:7px}
@@ -654,6 +660,23 @@
         <option value="2">Ivy (Locked in)</option>
       </select></label>
       <div class="subnote" id="eloline" title="League rating, anchored so the pre-neural Locked in brain sits near 2000. A tilde marks an estimate; &plusmn; is measurement uncertainty."></div>
+      <details class="ask advset" id="advmenu">
+        <summary>Advanced</summary>
+        <label>Silliness
+          <input type="range" id="sillyPct" min="0" max="100" step="1" value="0">
+          <span class="lifted" id="sillyPctVal">0%</span></label>
+        <div class="subnote">How often Ivy throws her turn away on a random square
+          instead of playing her best one.</div>
+        <label>Most per match
+          <input type="range" id="sillyMax" min="0" max="30" step="1" value="30">
+          <span class="lifted" id="sillyMaxVal">30</span></label>
+        <div class="subnote">She will not be silly more times than this in one game.</div>
+        <label><input type="checkbox" id="sillyNoEnd" checked> Prevent silliness in the endgame</label>
+        <div class="subnote">The endgame starts when she is down to her last third of pieces.</div>
+        <label><input type="checkbox" id="sillyNoDeus" checked> Prevent silly Deus placement</label>
+        <div class="subnote">Keeps a careless turn from spending her Deus, or from
+          letting the deadline pass with it still in hand.</div>
+      </details>
       <label><input type="checkbox" id="music" checked> Music</label>
       <label><input type="checkbox" id="sound" checked> Sound effects</label>
       <label><input type="checkbox" id="customcolors"> Enable custom colors</label>
@@ -1567,6 +1590,7 @@ function build(n){
   game=new Game(cfg);
   busy=false; deusMode=false; replay=null; justSwapped=false; setMood('idle');
   hoverAt=-1;                     // a rebuilt board is not under the pointer yet
+  sillySoFar=0;                   // her allowance is per match
   // the rules quote the count for the board in play, so it only moves when the
   // board does
   document.getElementById('deadlinen').textContent=game.deadline(); hushIvy();
@@ -1918,6 +1942,36 @@ function onClick(i){
   advance();
 }
 
+/* ---- silliness -------------------------------------------------------------
+   A dial that lets Ivy throw a turn away now and then, so a beginner gets an
+   opening without her having to be weak all game. It sits outside her brains
+   rather than inside any of them, so it works the same whichever one is chosen,
+   and it never touches the move she gives out as advice.
+
+   Returns the careless move, or null to let her play properly. */
+let sillySoFar=0;                          // spent so far this game, reset by build
+function sillyPick(g){
+  const pct=+document.getElementById('sillyPct').value;
+  const cap=+document.getElementById('sillyMax').value;
+  const noEnd=document.getElementById('sillyNoEnd').checked;
+  const noDeus=document.getElementById('sillyNoDeus').checked;
+  if(pct<=0 || sillySoFar>=cap) return null;
+  const her=g.toMove();
+  // The last third of her pieces is the same stretch the Deus deadline marks, so
+  // the endgame is measured the way the rules already measure it.
+  if(noEnd && g.left(her)<=g.deadline()) return null;
+  // Her final chance to send the Deus out is not a turn to be careless with,
+  // when carelessness with the Deus is the thing being guarded against.
+  if(noDeus && g.canDeus(her) && g.left(her)===g.deadline()+1) return null;
+  if(Math.random()*100 >= pct) return null;
+  const mv=g.moves();
+  if(!mv.length) return null;
+  // Unguarded, a careless turn can also be the one that wastes the Deus, which
+  // is the silliest thing available to her.
+  const deus = !noDeus && g.canDeus(her) && Math.random()<1/6;
+  return {cell:mv[(Math.random()*mv.length)|0], deus};
+}
+
 function advance(){
   render();
   if(finish()) return;
@@ -1967,7 +2021,10 @@ function advance(){
        entries below her are lab exports.  Anything that fails to load falls
        back to Sharp rather than stalling on a turn. */
     const d=document.getElementById('diff').value;
-    const act = d==='0'?pickGentle(game) : d==='1'?pickSteady(game) : d==='2'?pickSharp(game)
+    const silly=sillyPick(game);
+    if(silly) sillySoFar++;
+    const act = silly ? silly
+              : d==='0'?pickGentle(game) : d==='1'?pickSteady(game) : d==='2'?pickSharp(game)
               : (+d>=3 && window.pickShipped)?window.pickShipped(game,+d-3)
               : d.slice(0,4)==='hyb:'?pickHybrid(game,d.slice(4))
               : (window.pickNeural?window.pickNeural(game,d.slice(4)):pickSharp(game));
@@ -1980,6 +2037,7 @@ function advance(){
     const line = cell<0 ? 'Ivy passes.' : describe('Ivy',r,deus);
     say(justSwapped ? ('Ivy spends the turn you handed her. '+line).trim() : line);
     justSwapped=false;
+    if(silly) ivySpeak('heh heh', 2600);     // said after, so nothing clears it
     advance();
   },180);
 }
@@ -3187,6 +3245,50 @@ document.getElementById('inkreset').addEventListener('click',()=>{
   rebuildInk();
 });
 
+// The two dials show what they are set to, since a slider on its own says only
+// roughly.
+function showSilly(){
+  document.getElementById('sillyPctVal').textContent=document.getElementById('sillyPct').value+'%';
+  document.getElementById('sillyMaxVal').textContent=document.getElementById('sillyMax').value;
+}
+
+/* Kept between visits, the same way the colors are. Whether the section was left
+   open is kept too, since somebody who has set these once tends to want to see
+   them. Values are clamped on the way back in rather than trusted, because the
+   store is plain text on the player's own machine. */
+const SILLY_STORE='choral.silly';
+function saveSilly(){
+  try{
+    localStorage.setItem(SILLY_STORE, JSON.stringify({
+      pct:+document.getElementById('sillyPct').value,
+      max:+document.getElementById('sillyMax').value,
+      noEnd:document.getElementById('sillyNoEnd').checked,
+      noDeus:document.getElementById('sillyNoDeus').checked,
+      open:document.getElementById('advmenu').open
+    }));
+  }catch(err){}                            // private browsing, or a full store
+}
+function loadSilly(){
+  let s=null;
+  try{ s=JSON.parse(localStorage.getItem(SILLY_STORE)||'null'); }catch(err){}
+  if(!s) return;
+  const held=(v,lo,hi,dflt)=>Number.isFinite(+v)?Math.max(lo,Math.min(hi,Math.round(+v))):dflt;
+  document.getElementById('sillyPct').value=held(s.pct,0,100,0);
+  document.getElementById('sillyMax').value=held(s.max,0,30,30);
+  if(typeof s.noEnd==='boolean') document.getElementById('sillyNoEnd').checked=s.noEnd;
+  if(typeof s.noDeus==='boolean') document.getElementById('sillyNoDeus').checked=s.noDeus;
+  if(typeof s.open==='boolean') document.getElementById('advmenu').open=s.open;
+  showSilly();
+}
+for(const id of ['sillyPct','sillyMax']){
+  const el=document.getElementById(id);
+  el.addEventListener('input', ()=>{ showSilly(); saveSilly(); });
+}
+for(const id of ['sillyNoEnd','sillyNoDeus'])
+  document.getElementById(id).addEventListener('change', saveSilly);
+document.getElementById('advmenu').addEventListener('toggle', saveSilly);
+showSilly();
+
 document.getElementById('export').addEventListener('click',exportChronicle);
 document.getElementById('importbtn').addEventListener('click',()=>document.getElementById('importfile').click());
 document.getElementById('importfile').addEventListener('change',ev=>{
@@ -3212,6 +3314,7 @@ document.addEventListener('keydown',ev=>{
 });
 preload();
 loadInk();                  // colors chosen on an earlier visit, before the first draw
+loadSilly();                // and how silly she was last asked to be
 build(9);
 if(inkBox.checked) rebuildInk();
 </script>

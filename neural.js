@@ -132,6 +132,8 @@
     this._grp = new Int32Array(this.G.cells);
     this._eyeArr = new Int8Array(this.G.cells);
     this._eyeSeen = new Int32Array(this.G.cells);
+    this._stkArr = new Int32Array(this.G.cells + 8);
+    this._dseen = new Int8Array(this.G.cells);
   };
 
   /* ------------------------------------------------------------- primitives */
@@ -313,15 +315,45 @@
     eye.fill(0);
     for (let i = 0; i < cells; i++) {
       if (g.kind[i] !== EMPTY) continue;
-      let owner = 0;
+      // strict: every neighbour one side's (a finished eye, 40/41); loose:
+      // every NON-EMPTY neighbour one side's, at least one (eyespace, 46/47)
+      let loose = 0, sealedOk = true, any = false, mixed = false;
       const nb = g.cfg.nbr[i];
       for (let t = 0; t < nb.length; t++) {
         const m = nb[t];
-        if (g.kind[m] === EMPTY) { owner = 0; break; }
-        if (owner === 0) owner = g.own[m];
-        else if (owner !== g.own[m]) { owner = 0; break; }
+        if (g.kind[m] === EMPTY) { sealedOk = false; continue; }
+        any = true;
+        if (loose === 0) loose = g.own[m];
+        else if (loose !== g.own[m]) { mixed = true; break; }
       }
-      if (owner !== 0) { eye[i] = owner; set(owner === me ? 40 : 41, i, 1); }
+      // disjoint on purpose: finished eyes are 40/41 only, eyespace is the
+      // not-yet - the nested version measurably wrecked optimisation
+      if (any && !mixed) {
+        if (sealedOk) { eye[i] = loose; set(loose === me ? 40 : 41, i, 1); }
+        else set(loose === me ? 46 : 47, i, 1);
+      }
+    }
+
+    // planes 44-45: the realm's skeleton - everything in one connected stretch
+    // with each Deus, workers and land alike
+    const stk = this._stkArr, dseen = this._dseen;
+    dseen.fill(0);
+    for (let side2 = 1; side2 <= 2; side2++) {
+      const lc = g.deusCell[side2 - 1];
+      if (lc < 0) continue;
+      const plane = side2 === me ? 44 : 45;
+      // workers only - the land in this stretch is already the doubled plane
+      let sp = 0; stk[sp++] = lc; dseen[lc] = side2;
+      if (g.kind[lc] === PIECE) set(plane, lc, 1);
+      while (sp > 0) {
+        const j = stk[--sp], nb2 = g.cfg.nbr[j];
+        for (let t = 0; t < nb2.length; t++) {
+          const m = nb2[t];
+          if (dseen[m] === side2 || g.own[m] !== side2 || g.kind[m] === EMPTY) continue;
+          dseen[m] = side2; stk[sp++] = m;
+          if (g.kind[m] === PIECE) set(plane, m, 1);
+        }
+      }
     }
 
     // liberty buckets, one flood per band.  The scratch arrays are owned by
@@ -346,6 +378,15 @@
         }
       }
       if (eyes >= 2) for (let q = 0; q < r.n; q++) set(side === me ? 42 : 43, grp[q], 1);
+      // planes 48-49: where a one-breath band lives or dies
+      if (r.libs === 1) {
+        let lib = -1;
+        for (let q = 0; q < r.n && lib < 0; q++) {
+          const nb3 = g.cfg.nbr[grp[q]];
+          for (let t = 0; t < nb3.length; t++) if (g.kind[nb3[t]] === EMPTY) { lib = nb3[t]; break; }
+        }
+        if (lib >= 0) set(side === me ? 48 : 49, lib, 1);
+      }
     }
 
     const mv = g.moves();
