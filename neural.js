@@ -17,6 +17,35 @@
 (function (global) {
   'use strict';
 
+  /* ------------------------------------------------------------------ wasm
+     A 4KB SIMD kernel for the one hot loop, embedded base64 in ivy_wasm.js so
+     the page still works double-clicked off disk.  Small enough that the
+     synchronous compile path is legal everywhere, which removes every race:
+     by the time a net is built, the kernel either exists or it never will.
+     Anything missing - the file, WebAssembly itself, SIMD support, arena
+     space - quietly leaves the JavaScript path in charge.  Buffers live as
+     Float32Array views over the module's memory, so the kernel reads what
+     JavaScript wrote with no copying in either direction. */
+  let CW = null;
+  try {
+    if (global.CHORAL_WASM_B64 && typeof WebAssembly !== 'undefined') {
+      const bin = atob(global.CHORAL_WASM_B64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), {});
+      const ex = inst.exports;
+      if (ex.conv3 && ex.alloc && ex.memory) CW = { conv3: ex.conv3, alloc: ex.alloc, memory: ex.memory };
+    }
+  } catch (e) { CW = null; }
+  function walloc(nf) {
+    if (!CW) return null;
+    const ptr = CW.alloc(nf * 4);
+    if (!ptr) { CW = null; return null; }     // arena spent: newcomers fall back
+    const v = new Float32Array(CW.memory.buffer, ptr, nf);
+    v._ptr = ptr;
+    return v;
+  }
+
   /* ---------------------------------------------------------------- loading */
   function b64ToF32(s) {
     const bin = atob(s);
@@ -65,9 +94,36 @@
     if (this.G && this.G.n === n) return;
     this.G = Geom(n);
     const c = this.arch.channels, P = this.G.P;
-    this.X = new Float32Array(this.planes * P);
-    this.H = []; for (let i = 0; i <= this.arch.blocks; i++) this.H.push(new Float32Array(c * P));
-    this.M = []; for (let i = 0; i < this.arch.blocks; i++) this.M.push(new Float32Array(c * P));
+    /* wasm mode: the conv buffers and 3x3 weights live in kernel memory.
+       Only what conv3 touches moves there - the heads read the trunk through
+       the same views and never notice. */
+    this._wasm = false;
+    if (CW) {
+      const mk = nf => walloc(nf);
+      const X = mk(this.planes * P);
+      const H = [], M = [];
+      let ok = !!X;
+      for (let i = 0; ok && i <= this.arch.blocks; i++) { const v = mk(c * P); if (v) H.push(v); else ok = false; }
+      for (let i = 0; ok && i < this.arch.blocks; i++) { const v = mk(c * P); if (v) M.push(v); else ok = false; }
+      if (ok && !this._wUp) {
+        for (const tag of Object.keys(this.T)) {
+          if (!/\.w$|\.b$/.test(tag)) continue;
+          if (!(tag === 'stem.w' || tag === 'stem.b' || /^b\d+\./.test(tag))) continue;
+          const src = this.T[tag];
+          const dst = mk(src.length);
+          if (!dst) { ok = false; break; }
+          dst.set(src);
+          this.T[tag] = dst;
+        }
+        if (ok) this._wUp = true;
+      }
+      if (ok) { this.X = X; this.H = H; this.M = M; this._wasm = true; }
+    }
+    if (!this._wasm) {
+      this.X = new Float32Array(this.planes * P);
+      this.H = []; for (let i = 0; i <= this.arch.blocks; i++) this.H.push(new Float32Array(c * P));
+      this.M = []; for (let i = 0; i < this.arch.blocks; i++) this.M.push(new Float32Array(c * P));
+    }
     this.Pol = new Float32Array(2 * P);
     this.Val = new Float32Array(this.arch.valueCh * P);
     this.Own = new Float32Array(P);
@@ -93,6 +149,11 @@
      of the run time.  The odd channel at the end, if OC is odd, falls through to
      the single-channel path. */
   ChoralNet.prototype._conv3 = function (inp, outp, W, B, IC, OC) {
+    if (this._wasm && inp._ptr && outp._ptr && W._ptr && B._ptr) {
+      CW.conv3(inp._ptr, outp._ptr, W._ptr, B._ptr, IC, OC, this.G.P, this.G.S, this.G.lo, this.G.len);
+      for (let oc = 0; oc < OC; oc++) zeroHalo(outp, oc * this.G.P, this.G.S);
+      return;
+    }
     const G = this.G, P = G.P, lo = G.lo, len = G.len, o = G.off;
     const o0 = o[0], o1 = o[1], o2 = o[2], o3 = o[3], o4 = o[4], o5 = o[5], o6 = o[6], o7 = o[7], o8 = o[8];
     let oc = 0;
@@ -512,6 +573,6 @@
     return { ok: worstV < 2e-4 && worstP < 2e-4, cases: n, worstValue: worstV, worstPolicy: worstP };
   }
 
-  global.ChoralNeural = { get, list, puct, selfTest, legalMask, ChoralNet };
+  global.ChoralNeural = { get, list, puct, selfTest, legalMask, ChoralNet, wasm: () => !!CW };
   global.choralNetSelfTest = selfTest;
 })(window);
