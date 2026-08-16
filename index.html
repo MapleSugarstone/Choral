@@ -2815,7 +2815,7 @@ document.getElementById('askHint').addEventListener('click',()=>{
    compare the tiers at a glance, not teaching measurement theory.  The raw
    export numbers with uncertainties still exist in each brain's file and on
    the lab entries. */
-const SHIPPED_ELO = [2500, 2560, 2670];
+const SHIPPED_ELO = [2500, 2560, 2670, 3070];
 function eloTextOf(v){
   if(v==='0') return 'Elo: ~1550';
   if(v==='1') return 'Elo: ~1750';
@@ -3358,7 +3358,7 @@ if(inkBox.checked) rebuildInk();
    is shipped.  In-file markers were tried first and failed twice - a lab
    export of the same net loads later, overwrites the doc, and takes the
    marker with it.  Load position cannot be overwritten. */
-for(const f of ['ivy_pro.js','ivy_apex.js','ivy_summit.js'])
+for(const f of ['ivy_pro.js','ivy_apex.js','ivy_summit.js','ivy_regionals.js'])
   document.write('<scr'+'ipt src="'+f+'?v='+Date.now()+'"></scr'+'ipt>');
 document.write('<scr'+'ipt>window.CHORAL_SHIPPED=Object.keys(window.CHORAL_NETS||{});</scr'+'ipt>');
 for(const f of ['ivy_wasm.js','nets/opponents.js','nets/fixture.js','neural.js'])
@@ -3407,11 +3407,14 @@ for(const f of ['ivy_wasm.js','nets/opponents.js','nets/fixture.js','neural.js']
      To seat a future champion:
        1. cd sim && Fief.exe league export --pro --who <id> --out ../Choral/ivy_<era>.js
        2. add 'ivy_<era>.js' to the loader list at the top of this block
-       3. add her next name to SHIPPED_LABELS below                        */
+       3. add her next name to SHIPPED_LABELS below
+       4. add her curated figure to SHIPPED_ELO, up beside eloTextOf -
+          without it the new tier alone wears a raw rating and error bar   */
   const SHIPPED_LABELS = [
     'Ivy (Secretly Pro)',
     'Ivy (Training arc after losing to Seam)',
-    'Ivy (Starting her tournament career)'
+    'Ivy (Starting her tournament career)',
+    'Ivy (Qualifying for regionals)'
   ];
   const proNames = (window.CHORAL_SHIPPED || []).filter(nm => nets.some(nn => nn.name === nm));
   proNames.forEach((nm, i) => {
